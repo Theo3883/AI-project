@@ -8,6 +8,7 @@ from .core.generators import QuestionFactory
 from .core.evaluators import EvaluatorFactory
 from .services.text_processing import TextProcessor
 from .services.pdf_service import PdfService
+from .services.qa_service import QAService, QAResponse
 
 
 @dataclass
@@ -21,6 +22,7 @@ class SmarTestApp:
         self.pdf_service = PdfService()
         self.question_factory = QuestionFactory()
         self.evaluator_factory = EvaluatorFactory(self.text_processor)
+        self.qa_service = QAService()
         self._questions: List[Question] = []
         self._current_test: Optional[GeneratedTest] = None
 
@@ -61,6 +63,22 @@ class SmarTestApp:
 
     def extract_text_from_pdf(self, file_path: str) -> str:
         return self.pdf_service.extract_text(file_path)
+
+    def answer_question(self, question_text: str) -> QAResponse:
+        """
+        Answer a user's question about a problem.
+        
+        Args:
+            question_text: Natural language description of the problem
+            
+        Returns:
+            QAResponse with solution or error information
+        """
+        return self.qa_service.answer_question(question_text)
+    
+    def get_example_questions(self):
+        """Get example questions for the Q&A system."""
+        return self.qa_service.get_example_questions()
 
     def run(self) -> None:
         from .gui.main_window import run_gui

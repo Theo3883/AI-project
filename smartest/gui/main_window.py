@@ -18,10 +18,12 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QMessageBox,
     QGroupBox,
+    QTabWidget,
 )
 
 from ..core.models import Question, QuestionType
 from ..app import SmarTestApp
+from .qa_panel import QAPanel
 
 
 class MainWindow(QMainWindow):
@@ -40,7 +42,17 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
 
-        root_layout = QHBoxLayout(central)
+        # Create main layout with tabs
+        main_layout = QVBoxLayout(central)
+        
+        # Create tab widget
+        tabs = QTabWidget()
+        main_layout.addWidget(tabs)
+        
+        # Tab 1: Question Generator (existing functionality)
+        generator_tab = QWidget()
+        tabs.addTab(generator_tab, "Question Generator")
+        root_layout = QHBoxLayout(generator_tab)
 
         left_panel = QVBoxLayout()
         root_layout.addLayout(left_panel, 1)
@@ -113,6 +125,10 @@ class MainWindow(QMainWindow):
         btn_export_eval = QPushButton("Exporta feedback pentru intrebare in PDF...")
         btn_export_eval.clicked.connect(self._on_export_evaluation)
         right_panel.addWidget(btn_export_eval)
+        
+        # Tab 2: Q&A Problem Solver
+        qa_tab = QAPanel(self.app_facade)
+        tabs.addTab(qa_tab, "Rezolvator Probleme Q&A")
 
     def _selected_types(self) -> List[QuestionType]:
         types: List[QuestionType] = []
