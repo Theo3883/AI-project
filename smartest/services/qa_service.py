@@ -102,6 +102,14 @@ class QAService:
             return self._format_minimax_response(parsed, solution_data)
         elif parsed.question_type == QuestionType.STRATEGY_SELECTION:
             return self._format_strategy_response(parsed, solution_data)
+        elif parsed.question_type == QuestionType.VALUE_ITERATION:
+            return self._format_value_iteration_response(parsed, solution_data)
+        elif parsed.question_type == QuestionType.POLICY_ITERATION:
+            return self._format_policy_iteration_response(parsed, solution_data)
+        elif parsed.question_type == QuestionType.Q_LEARNING:
+            return self._format_qlearning_response(parsed, solution_data)
+        elif parsed.question_type == QuestionType.TD_LEARNING:
+            return self._format_tdlearning_response(parsed, solution_data)
         else:
             return QAResponse(
                 success=False,
@@ -280,6 +288,158 @@ class QAService:
             explanation=explanation
         )
     
+    def _format_value_iteration_response(self, parsed: ParsedProblem, solution_data: Dict[str, Any]) -> QAResponse:
+        """Format Value Iteration solution."""
+        grid = parsed.data["grid"]
+        iterations = parsed.data.get("iterations", 1)
+        values = solution_data.get("values", {})
+        policy = solution_data.get("policy", {})
+        complexity = solution_data.get("complexity", "")
+        
+        # Format extracted parameters
+        params_lines = ["Problema MDP (Value Iteration):"]
+        params_lines.append(f"  Grid: {grid.rows}x{grid.cols}")
+        params_lines.append(f"  Discount factor γ = {grid.discount_factor}")
+        params_lines.append(f"  Probabilitate intentionata: {grid.transition_probs.get('intended', 0.8)}")
+        params_lines.append(f"  Iteratii: {iterations}")
+        
+        # Format solution
+        solution_lines = ["Valorile Utilitatii (V):"]
+        for (r, c), value in sorted(values.items()):
+            if (r, c) in grid.walls:
+                solution_lines.append(f"  V({r},{c}) = PERETE")
+            elif grid.states[(r, c)].is_terminal:
+                solution_lines.append(f"  V({r},{c}) = {value:.3f} (TERMINAL)")
+            else:
+                solution_lines.append(f"  V({r},{c}) = {value:.3f}")
+        
+        solution_lines.append("\nPolitica Optima:")
+        for (r, c), action in sorted(policy.items()):
+            solution_lines.append(f"  π({r},{c}) = {action}")
+        
+        explanation = (
+            f"Solutie obtinuta folosind algoritmul Value Iteration cu ecuatia Bellman: "
+            f"V(s) = max_a Σ P(s'|s,a)[R + γV(s')]. {complexity}"
+        )
+        
+        return QAResponse(
+            success=True,
+            detected_type="Value Iteration (MDP)",
+            detected_type_enum=QuestionType.VALUE_ITERATION,
+            confidence=parsed.confidence,
+            extracted_params="\n".join(params_lines),
+            solution="\n".join(solution_lines),
+            explanation=explanation
+        )
+    
+    def _format_policy_iteration_response(self, parsed: ParsedProblem, solution_data: Dict[str, Any]) -> QAResponse:
+        """Format Policy Iteration solution."""
+        values = solution_data.get("values", {})
+        policy = solution_data.get("policy", {})
+        iterations = solution_data.get("iterations", 0)
+        difference = solution_data.get("difference", "")
+        
+        params_lines = ["Problema MDP (Policy Iteration):"]
+        params_lines.append(f"  Iteratii pana la convergenta: {iterations}")
+        
+        solution_lines = ["Politica Optima:"]
+        for (r, c), action in sorted(policy.items()):
+            solution_lines.append(f"  π({r},{c}) = {action}")
+        
+        solution_lines.append("\nValoril Finale:")
+        for (r, c), value in sorted(values.items()):
+            solution_lines.append(f"  V({r},{c}) = {value:.3f}")
+        
+        explanation = f"Solutie obtinuta folosind algoritmul Policy Iteration. {difference}"
+        
+        return QAResponse(
+            success=True,
+            detected_type="Policy Iteration (MDP)",
+            detected_type_enum=QuestionType.POLICY_ITERATION,
+            confidence=parsed.confidence,
+            extracted_params="\n".join(params_lines),
+            solution="\n".join(solution_lines),
+            explanation=explanation
+        )
+    
+    def _format_qlearning_response(self, parsed: ParsedProblem, solution_data: Dict[str, Any]) -> QAResponse:
+        """Format Q-learning solution."""
+        transitions = parsed.data["transitions"]
+        params = parsed.data["parameters"]
+        q_values = solution_data.get("q_values", {})
+        policy = solution_data.get("policy", {})
+        params_explanation = solution_data.get("parameters_explanation", {})
+        
+        params_lines = ["Problema Q-learning:"]
+        params_lines.append(f"  α (learning rate) = {params.alpha}")
+        params_lines.append(f"  γ (discount factor) = {params.gamma}")
+        params_lines.append(f"  ε (exploration rate) = {params.epsilon}")
+        params_lines.append(f"  Numar tranzitii: {len(transitions)}")
+        
+        solution_lines = ["Valorile Q finale:"]
+        for (state, action), value in sorted(q_values.items()):
+            solution_lines.append(f"  Q({state}, {action}) = {value:.3f}")
+        
+        solution_lines.append("\nPolitica extrasa:")
+        for state, action in sorted(policy.items()):
+            solution_lines.append(f"  π({state}) = {action}")
+        
+        explanation_parts = [
+            "Solutie obtinuta folosind Q-learning cu formula:",
+            "Q(s,a) ← Q(s,a) + α[r + γ max_a' Q(s',a') - Q(s,a)]",
+            "",
+            "Rolul parametrilor:"
+        ]
+        for param_name, param_explanation in params_explanation.items():
+            explanation_parts.append(f"  • {param_name}: {param_explanation}")
+        
+        return QAResponse(
+            success=True,
+            detected_type="Q-learning (Reinforcement Learning)",
+            detected_type_enum=QuestionType.Q_LEARNING,
+            confidence=parsed.confidence,
+            extracted_params="\n".join(params_lines),
+            solution="\n".join(solution_lines),
+            explanation="\n".join(explanation_parts)
+        )
+    
+    def _format_tdlearning_response(self, parsed: ParsedProblem, solution_data: Dict[str, Any]) -> QAResponse:
+        """Format TD-learning solution."""
+        transitions = parsed.data["transitions"]
+        params = parsed.data["parameters"]
+        values = solution_data.get("values", {})
+        td_errors = solution_data.get("td_errors", [])
+        
+        params_lines = ["Problema TD-learning:"]
+        params_lines.append(f"  α (learning rate) = {params.alpha}")
+        params_lines.append(f"  γ (discount factor) = {params.gamma}")
+        params_lines.append(f"  Numar tranzitii: {len(transitions)}")
+        
+        solution_lines = ["Valorile finale V(s):"]
+        for state, value in sorted(values.items()):
+            solution_lines.append(f"  V({state}) = {value:.3f}")
+        
+        if td_errors:
+            solution_lines.append("\nTD-errors pentru fiecare tranzitie:")
+            for i, error in enumerate(td_errors, 1):
+                solution_lines.append(f"  Tranzitie {i}: TD-error = {error:.3f}")
+        
+        explanation = (
+            "Solutie obtinuta folosind TD(0) learning cu formula: "
+            "V(s) ← V(s) + α[r + γV(s') - V(s)]. "
+            "TD-error masoara diferenta intre estimarea curenta si noua informatie."
+        )
+        
+        return QAResponse(
+            success=True,
+            detected_type="TD-learning (Reinforcement Learning)",
+            detected_type_enum=QuestionType.TD_LEARNING,
+            confidence=parsed.confidence,
+            extracted_params="\n".join(params_lines),
+            solution="\n".join(solution_lines),
+            explanation=explanation
+        )
+    
     def get_example_questions(self) -> Dict[str, List[str]]:
         """Return example questions for each problem type."""
         return {
@@ -303,6 +463,21 @@ class QAService:
                 "Ce algoritm ar trebui sa folosesc pentru Turnurile din Hanoi?",
                 "Recomanda o strategie pentru problema de colorare a grafului.",
                 "Ce abordare functioneaza pentru problema calului (knight's tour)?"
+            ],
+            "Value Iteration": [
+                "Aplica Value Iteration pe un grid 3x4 cu gamma=0.9, recompensa (0,3)=1.0, (1,3)=-1.0, perete la (1,1).",
+                "MDP grid world 3x4, discount 0.9, intended probability 0.8, perpendicular 0.1. Aplica un pas de value iteration.",
+                "Calculeaza V pentru grid MDP cu reward +1 la (0,3) si -1 la (1,3), living cost -0.04, gamma 0.9"
+            ],
+            "Q-learning": [
+                "Aplica Q-learning cu alpha=0.1, gamma=0.9 pentru tranzitiile: s=(0,0), a=right, s'=(0,1), r=0; s=(0,1), a=right, s'=(0,2), r=1",
+                "Q-learning cu parametri alpha=0.2, gamma=0.8. Tranzitii: (0,0)->right->(0,1), reward=-0.04; (0,1)->up->(0,0), reward=-0.04",
+                "Calculeaza valorile Q pentru secventa: s=(1,1), a=down, s'=(2,1), r=-0.1; s=(2,1), a=right, s'=(2,2), r=1.0. Alpha=0.1, gamma=0.9"
+            ],
+            "TD-learning": [
+                "Aplica TD-learning (TD(0)) cu alpha=0.1, gamma=0.9 pentru: s=(0,0), s'=(0,1), r=-0.04; s=(0,1), s'=(0,2), r=-0.04",
+                "TD(0) cu alpha=0.2, gamma=0.8. Valori initiale V=0. Tranzitii: (0,0)->(0,1), r=0; (0,1)->(0,2), r=1",
+                "Calculeaza V folosind TD-learning: (1,1)->(1,2), r=-0.1; (1,2)->(1,3), r=1.0. Alpha=0.1, gamma=0.9, V initial=0"
             ]
         }
 

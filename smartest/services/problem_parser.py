@@ -5,7 +5,18 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Dict, Any, List, Optional
 
-from ..core.models import QuestionType, NashGame, CspInstance, CspVariable, CspConstraint, GameTreeNode
+from ..core.models import (
+    QuestionType, 
+    NashGame, 
+    CspInstance, 
+    CspVariable, 
+    CspConstraint, 
+    GameTreeNode,
+    GridWorld,
+    MDPState,
+    Transition,
+    RLParameters
+)
 
 
 @dataclass
@@ -41,11 +52,20 @@ class NashGameExtractor(ProblemExtractor):
         keyword_matches = sum(1 for kw in self.KEYWORDS if kw in text_lower)
         
         # Check for payoff patterns like (3,2) or (3, 2)
+        # BUT: make sure it's not MDP/RL related (which uses (r,c) for states)
         has_payoffs = bool(re.search(r'\(\s*\d+\s*,\s*\d+\s*\)', text))
         
+        # If MDP/RL keywords present, reduce confidence significantly
+        mdp_rl_keywords = ['mdp', 'markov', 'bellman', 'grid', 'value iteration', 'policy iteration',
+                          'q-learning', 'td-learning', 'reinforcement', 'alpha', 'gamma', 'reward']
+        has_mdp_rl = any(kw in text_lower for kw in mdp_rl_keywords)
+        
         confidence = (keyword_matches / len(self.KEYWORDS)) * 0.7
-        if has_payoffs:
+        if has_payoffs and not has_mdp_rl:
             confidence += 0.3
+        elif has_mdp_rl:
+            # Penalize if MDP/RL keywords present
+            confidence *= 0.2
             
         return min(confidence, 1.0)
     
@@ -370,6 +390,231 @@ class StrategyExtractor(ProblemExtractor):
         return {"problem": problem}
 
 
+class MDPExtractor(ProblemExtractor):
+    """Extracts MDP grid world problems from text."""
+    
+    KEYWORDS = ['mdp', 'markov', 'value iteration', 'policy iteration', 'grid', 'grid world', 
+                'bellman', 'utilitate', 'utility', 'discount', 'gamma']
+    
+    def can_extract(self, text: str) -> float:
+        text_lower = text.lower()
+        keyword_matches = sum(1 for kw in self.KEYWORDS if kw in text_lower)
+        
+        # Check for grid dimensions
+        has_grid = bool(re.search(r'\d+x\d+', text))
+        
+        # Check for reward patterns
+        has_rewards = bool(re.search(r'reward|recompens', text_lower))
+        
+        # Check for state patterns
+        has_states = bool(re.search(r'\(\s*\d+\s*,\s*\d+\s*\)', text))
+        
+        confidence = (keyword_matches / len(self.KEYWORDS)) * 0.5
+        if has_grid:
+            confidence += 0.2
+        if has_rewards:
+            confidence += 0.15
+        if has_states:
+            confidence += 0.15
+            
+        return min(confidence, 1.0)
+    
+    def extract(self, text: str) -> Dict[str, Any]:
+        """
+        Extracts MDP grid world from text.
+        Supports formats like:
+        - "grid 3x4"
+        - "states: (0,0), (0,1), ..."
+        - "reward at (0,3) = 1.0"
+        - "discount factor gamma = 0.9"
+        """
+        # Extract grid dimensions
+        grid_match = re.search(r'(\d+)\s*x\s*(\d+)', text, re.IGNORECASE)
+        if grid_match:
+            rows = int(grid_match.group(1))
+            cols = int(grid_match.group(2))
+        else:
+            # Default grid
+            rows, cols = 3, 4
+        
+        # Extract discount factor
+        gamma_match = re.search(r'gamma\s*=\s*(0\.\d+)|discount.*?(0\.\d+)', text, re.IGNORECASE)
+        if gamma_match:
+            gamma = float(gamma_match.group(1) or gamma_match.group(2))
+        else:
+            gamma = 0.9
+        
+        # Extract rewards
+        reward_pattern = r'\(\s*(\d+)\s*,\s*(\d+)\s*\).*?(-?\d+\.?\d*)'
+        reward_matches = re.findall(reward_pattern, text)
+        
+        states = {}
+        for r in range(rows):
+            for c in range(cols):
+                states[(r, c)] = MDPState(row=r, col=c, is_terminal=False, reward=-0.04)
+        
+        # Apply extracted rewards
+        for r_str, c_str, reward_str in reward_matches:
+            r, c = int(r_str), int(c_str)
+            reward = float(reward_str)
+            if (r, c) in states:
+                states[(r, c)].reward = reward
+                if abs(reward) >= 1.0:
+                    states[(r, c)].is_terminal = True
+        
+        # Extract walls
+        wall_pattern = r'wall.*?\(\s*(\d+)\s*,\s*(\d+)\s*\)|perete.*?\(\s*(\d+)\s*,\s*(\d+)\s*\)'
+        wall_matches = re.findall(wall_pattern, text, re.IGNORECASE)
+        walls = []
+        for match in wall_matches:
+            r = int(match[0] or match[2])
+            c = int(match[1] or match[3])
+            walls.append((r, c))
+        
+        # Extract transition probabilities
+        intended_prob = 0.8
+        perp_prob = 0.1
+        
+        prob_match = re.search(r'intended.*?(0\.\d+)', text, re.IGNORECASE)
+        if prob_match:
+            intended_prob = float(prob_match.group(1))
+        
+        perp_match = re.search(r'perpendicular.*?(0\.\d+)', text, re.IGNORECASE)
+        if perp_match:
+            perp_prob = float(perp_match.group(1))
+        
+        transition_probs = {"intended": intended_prob, "perpendicular": perp_prob}
+        
+        grid = GridWorld(
+            rows=rows,
+            cols=cols,
+            states=states,
+            discount_factor=gamma,
+            transition_probs=transition_probs,
+            walls=walls
+        )
+        
+        # Determine number of iterations
+        iterations = 1
+        iter_match = re.search(r'(\d+)\s*(?:pas|step|iteration)', text, re.IGNORECASE)
+        if iter_match:
+            iterations = int(iter_match.group(1))
+        
+        return {"grid": grid, "iterations": iterations}
+
+
+class RLExtractor(ProblemExtractor):
+    """Extracts RL problems (Q-learning, TD-learning) from text."""
+    
+    KEYWORDS = ['q-learning', 'q learning', 'td-learning', 'td learning', 'temporal difference', 
+                'alpha', 'gamma', 'epsilon', 'transition', 'observation', 'learning rate']
+    
+    def can_extract(self, text: str) -> float:
+        text_lower = text.lower()
+        keyword_matches = sum(1 for kw in self.KEYWORDS if kw in text_lower)
+        
+        # Check for transition patterns: (s, a, s', r)
+        has_transitions = bool(re.search(r's\s*=|state\s*=|stare\s*=', text_lower))
+        
+        # Check for parameters
+        has_params = bool(re.search(r'alpha\s*=|gamma\s*=|epsilon\s*=', text_lower))
+        
+        # Check for Q-values
+        has_q_values = bool(re.search(r'q\s*\(|q-value|q value', text_lower))
+        
+        confidence = (keyword_matches / len(self.KEYWORDS)) * 0.5
+        if has_transitions:
+            confidence += 0.2
+        if has_params:
+            confidence += 0.2
+        if has_q_values:
+            confidence += 0.1
+            
+        return min(confidence, 1.0)
+    
+    def extract(self, text: str) -> Dict[str, Any]:
+        """
+        Extracts RL problem from text.
+        Supports formats like:
+        - "s=(0,0), a=right, s'=(0,1), r=0"
+        - "alpha=0.1, gamma=0.9, epsilon=0.1"
+        - "Q((0,0), right) = 0.5"
+        """
+        # Extract parameters
+        alpha = 0.1
+        gamma = 0.9
+        epsilon = 0.1
+        
+        alpha_match = re.search(r'alpha\s*=\s*(0\.\d+)', text, re.IGNORECASE)
+        if alpha_match:
+            alpha = float(alpha_match.group(1))
+        
+        gamma_match = re.search(r'gamma\s*=\s*(0\.\d+)', text, re.IGNORECASE)
+        if gamma_match:
+            gamma = float(gamma_match.group(1))
+        
+        epsilon_match = re.search(r'epsilon\s*=\s*(0\.\d+)', text, re.IGNORECASE)
+        if epsilon_match:
+            epsilon = float(epsilon_match.group(1))
+        
+        params = RLParameters(alpha=alpha, gamma=gamma, epsilon=epsilon)
+        
+        # Extract transitions
+        # Pattern: s=(0,0), a=right, s'=(0,1), r=0.5
+        transition_pattern = r's\s*=\s*\((\d+),\s*(\d+)\).*?a\s*=\s*(\w+).*?s.*?=\s*\((\d+),\s*(\d+)\).*?r\s*=\s*(-?\d+\.?\d*)'
+        transition_matches = re.findall(transition_pattern, text, re.IGNORECASE)
+        
+        transitions = []
+        for match in transition_matches:
+            state = (int(match[0]), int(match[1]))
+            action = match[2]
+            next_state = (int(match[3]), int(match[4]))
+            reward = float(match[5])
+            transitions.append(Transition(state=state, action=action, next_state=next_state, reward=reward))
+        
+        # Extract initial Q-values or V-values
+        q_value_pattern = r'Q\s*\(\s*\((\d+),\s*(\d+)\)\s*,\s*(\w+)\s*\)\s*=\s*(-?\d+\.?\d*)'
+        q_matches = re.findall(q_value_pattern, text, re.IGNORECASE)
+        
+        initial_q = {}
+        for match in q_matches:
+            state = (int(match[0]), int(match[1]))
+            action = match[2]
+            value = float(match[3])
+            initial_q[(state, action)] = value
+        
+        # Extract initial V-values
+        v_value_pattern = r'V\s*\(\s*\((\d+),\s*(\d+)\)\s*\)\s*=\s*(-?\d+\.?\d*)'
+        v_matches = re.findall(v_value_pattern, text, re.IGNORECASE)
+        
+        initial_v = {}
+        for match in v_matches:
+            state = (int(match[0]), int(match[1]))
+            value = float(match[2])
+            initial_v[state] = value
+        
+        # Determine problem type
+        if 'q-learning' in text.lower() or 'q learning' in text.lower():
+            return {
+                "transitions": transitions,
+                "parameters": params,
+                "initial_q": initial_q
+            }
+        elif 'td' in text.lower() or 'temporal difference' in text.lower():
+            return {
+                "transitions": transitions,
+                "parameters": params,
+                "initial_v": initial_v
+            }
+        else:
+            # Default to Q-learning
+            return {
+                "transitions": transitions,
+                "parameters": params,
+                "initial_q": initial_q
+            }
+
+
 class ProblemParser:
     """Main parser that coordinates type detection and extraction."""
     
@@ -379,6 +624,8 @@ class ProblemParser:
             QuestionType.CSP_COMPLETION: CspExtractor(),
             QuestionType.MINIMAX_ALPHA_BETA: MinimaxExtractor(),
             QuestionType.STRATEGY_SELECTION: StrategyExtractor(),
+            QuestionType.VALUE_ITERATION: MDPExtractor(),
+            QuestionType.Q_LEARNING: RLExtractor(),
         }
     
     def parse(self, text: str) -> ParsedProblem:
@@ -413,6 +660,8 @@ class ProblemParser:
             'nqueens': ['n-queen', 'nqueen', 'queens'],
             'knights': ['knight', 'cal'],
             'coloring': ['graph color', 'colorare graf'],
+            'mdp': ['mdp', 'markov', 'value iteration', 'policy iteration', 'bellman', 'grid world'],
+            'rl': ['q-learning', 'q learning', 'td-learning', 'td learning', 'reinforcement learning'],
         }
         
         # Check for "using/with/cu/folosind" pattern with explicit problem types
@@ -452,8 +701,10 @@ class ProblemParser:
                 csp_keywords = ['csp', 'constraint', 'variable', 'coloring']
                 minimax_keywords = ['minimax', 'alpha', 'beta', 'tree', 'leaf', 'leaves']
                 strategy_keywords = ['strategy', 'n-queen', 'hanoi', 'knight', 'tour', 'backtracking']
+                mdp_keywords = ['mdp', 'markov', 'value iteration', 'policy iteration', 'bellman', 'grid world']
+                rl_keywords = ['q-learning', 'q learning', 'td-learning', 'td learning', 'reinforcement']
                 
-                keyword_sets = [nash_keywords, csp_keywords, minimax_keywords, strategy_keywords]
+                keyword_sets = [nash_keywords, csp_keywords, minimax_keywords, strategy_keywords, mdp_keywords, rl_keywords]
                 
                 # Count how many different problem types are mentioned across parts
                 types_found = 0
@@ -474,12 +725,19 @@ class ProblemParser:
         mentioned_categories = set()
         
         # Map to broader categories
+        # Note: check for more specific keywords first to avoid confusion
+        # (e.g., "alpha-beta" vs "alpha" in RL)
         if any(kw in text_lower for kw in ['nash', 'echilibru']):
             mentioned_categories.add('nash')
         if any(kw in text_lower for kw in ['csp', 'constraint', 'constrangere', 'satisfacere']):
             mentioned_categories.add('csp')
-        if any(kw in text_lower for kw in ['minimax', 'alpha-beta', 'alpha beta', 'pruning']):
+        # Minimax: check for "alpha-beta" or "alpha beta" together, NOT just "alpha" or "beta" alone
+        if 'alpha-beta' in text_lower or 'alpha beta' in text_lower or 'minimax' in text_lower or 'pruning' in text_lower:
             mentioned_categories.add('minimax')
+        if any(kw in text_lower for kw in ['mdp', 'markov', 'bellman', 'grid world', 'value iteration', 'policy iteration']):
+            mentioned_categories.add('mdp')
+        if any(kw in text_lower for kw in ['q-learning', 'q learning', 'td-learning', 'td learning', 'reinforcement']):
+            mentioned_categories.add('rl')
         # For strategy problems, only count if they seem to be the main topic
         # (avoid false positives where they're just mentioned in passing)
         strategy_mentions = sum(1 for kw in ['hanoi', 'turnuri', 'n-queen', 'nqueen', 'knight', 'cal'] if kw in text_lower)
@@ -509,7 +767,9 @@ class ProblemParser:
                 "- Nash/equilibrium/echilibru/joc pentru probleme de echilibru Nash\n"
                 "- CSP/constraint/constrangere/variabile pentru probleme CSP\n"
                 "- Minimax/alpha-beta/arbore de joc pentru probleme minimax\n"
-                "- Strategy/strategie/n-queens/hanoi pentru selectia strategiei"
+                "- Strategy/strategie/n-queens/hanoi pentru selectia strategiei\n"
+                "- MDP/Markov/Value Iteration/Bellman/grid world pentru probleme MDP\n"
+                "- Q-learning/TD-learning/reinforcement learning pentru probleme RL"
             )
         
         # Extract data using the best extractor

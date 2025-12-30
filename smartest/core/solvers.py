@@ -3,7 +3,17 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List
 
-from .models import QuestionType, NashGame, CspInstance, GameTreeNode
+from .models import (
+    QuestionType, 
+    NashGame, 
+    CspInstance, 
+    GameTreeNode,
+    GridWorld,
+    MDPState,
+    Transition,
+    RLParameters,
+    QTable
+)
 
 
 class Solver(ABC):
@@ -204,6 +214,265 @@ class MinimaxAlphaBetaSolver(Solver):
         }
 
 
+class ValueIterationSolver(Solver):
+    """
+    Implements Bellman equation: V(s) = max_a Σ_s' P(s'|s,a)[R(s,a,s') + γV(s')]
+    Complexity: O(|S|² |A|) per iteration
+    """
+    
+    def solve(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        grid: GridWorld = data["grid"]
+        iterations: int = data.get("iterations", 1)
+        
+        # Initialize values to 0
+        V = {(r, c): 0.0 for r in range(grid.rows) for c in range(grid.cols)}
+        
+        # Set terminal states
+        for (r, c), state in grid.states.items():
+            if state.is_terminal:
+                V[(r, c)] = state.reward
+        
+        # Track which states were updated
+        updated_states = []
+        
+        for _ in range(iterations):
+            V_new = V.copy()
+            for (r, c) in V:
+                if (r, c) in grid.walls or grid.states[(r, c)].is_terminal:
+                    continue
+                
+                # Bellman update
+                max_value = float('-inf')
+                for action in ["up", "down", "left", "right"]:
+                    value = 0.0
+                    for (next_state, prob) in grid.get_neighbors((r, c), action):
+                        reward = grid.states[next_state].reward
+                        value += prob * (reward + grid.discount_factor * V[next_state])
+                    max_value = max(max_value, value)
+                
+                V_new[(r, c)] = max_value
+                if V_new[(r, c)] != V[(r, c)]:
+                    updated_states.append((r, c))
+            
+            V = V_new
+        
+        # Extract policy
+        policy = self._extract_policy(grid, V)
+        
+        return {
+            "values": V,
+            "policy": policy,
+            "updated_states": updated_states,
+            "complexity": f"O(|S|^2 * |A|) = O({grid.rows * grid.cols}^2 * 4) per iteration"
+        }
+    
+    def _extract_policy(self, grid: GridWorld, V: Dict) -> Dict[tuple[int, int], str]:
+        """Extract optimal policy from value function."""
+        policy = {}
+        for (r, c) in V:
+            if (r, c) in grid.walls or grid.states[(r, c)].is_terminal:
+                continue
+            
+            best_action = None
+            best_value = float('-inf')
+            
+            for action in ["up", "down", "left", "right"]:
+                value = 0.0
+                for (next_state, prob) in grid.get_neighbors((r, c), action):
+                    reward = grid.states[next_state].reward
+                    value += prob * (reward + grid.discount_factor * V[next_state])
+                
+                if value > best_value:
+                    best_value = value
+                    best_action = action
+            
+            policy[(r, c)] = best_action
+        
+        return policy
+
+
+class PolicyIterationSolver(Solver):
+    """
+    Policy Iteration: alternates between policy evaluation and policy improvement.
+    Converges faster than Value Iteration (fewer iterations, but more expensive per iteration).
+    """
+    
+    def solve(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        grid: GridWorld = data["grid"]
+        
+        # Initialize random policy
+        policy = {}
+        for r in range(grid.rows):
+            for c in range(grid.cols):
+                if (r, c) not in grid.walls and not grid.states[(r, c)].is_terminal:
+                    policy[(r, c)] = "up"
+        
+        iteration_count = 0
+        while True:
+            # Policy Evaluation
+            V = self._policy_evaluation(grid, policy)
+            
+            # Policy Improvement
+            policy_stable = True
+            new_policy = {}
+            
+            for (r, c) in policy:
+                if (r, c) in grid.walls or grid.states[(r, c)].is_terminal:
+                    continue
+                
+                old_action = policy[(r, c)]
+                
+                # Find best action
+                best_action = None
+                best_value = float('-inf')
+                
+                for action in ["up", "down", "left", "right"]:
+                    value = self._compute_action_value(grid, V, (r, c), action)
+                    if value > best_value:
+                        best_value = value
+                        best_action = action
+                
+                new_policy[(r, c)] = best_action
+                
+                if old_action != best_action:
+                    policy_stable = False
+            
+            iteration_count += 1
+            policy = new_policy
+            
+            if policy_stable:
+                break
+        
+        return {
+            "values": V,
+            "policy": policy,
+            "iterations": iteration_count,
+            "difference": "Policy Iteration converge mai rapid (mai putine iteratii) dar fiecare iteratie este mai costisitoare decat Value Iteration"
+        }
+    
+    def _policy_evaluation(self, grid: GridWorld, policy: Dict[tuple[int, int], str]) -> Dict[tuple[int, int], float]:
+        """Evaluate policy to compute state values."""
+        V = {(r, c): 0.0 for r in range(grid.rows) for c in range(grid.cols)}
+        
+        # Set terminal states
+        for (r, c), state in grid.states.items():
+            if state.is_terminal:
+                V[(r, c)] = state.reward
+        
+        # Iterative policy evaluation
+        threshold = 0.01
+        while True:
+            delta = 0
+            V_new = V.copy()
+            
+            for (r, c) in V:
+                if (r, c) in grid.walls or grid.states[(r, c)].is_terminal:
+                    continue
+                
+                action = policy.get((r, c), "up")
+                value = 0.0
+                
+                for (next_state, prob) in grid.get_neighbors((r, c), action):
+                    reward = grid.states[next_state].reward
+                    value += prob * (reward + grid.discount_factor * V[next_state])
+                
+                V_new[(r, c)] = value
+                delta = max(delta, abs(V_new[(r, c)] - V[(r, c)]))
+            
+            V = V_new
+            if delta < threshold:
+                break
+        
+        return V
+    
+    def _compute_action_value(self, grid: GridWorld, V: Dict[tuple[int, int], float], 
+                             state: tuple[int, int], action: str) -> float:
+        """Compute Q(s,a) = Σ P(s'|s,a)[R + γV(s')]."""
+        value = 0.0
+        for (next_state, prob) in grid.get_neighbors(state, action):
+            reward = grid.states[next_state].reward
+            value += prob * (reward + grid.discount_factor * V[next_state])
+        return value
+
+
+class QLearningSolver(Solver):
+    """
+    Q-learning update rule: Q(s,a) ← Q(s,a) + α[r + γ max_a' Q(s',a') - Q(s,a)]
+    Model-free temporal difference learning.
+    """
+    
+    def solve(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        transitions: List[Transition] = data["transitions"]
+        params: RLParameters = data["parameters"]
+        initial_q: Dict = data.get("initial_q", {})
+        
+        Q = QTable()
+        Q.values = initial_q.copy()
+        
+        for transition in transitions:
+            s, a, s_prime, r = transition.state, transition.action, transition.next_state, transition.reward
+            
+            # Find max Q(s', a')
+            max_q_next = max(
+                [Q.get(s_prime, action) for action in ["up", "down", "left", "right"]],
+                default=0.0
+            )
+            
+            # Q-learning update
+            old_q = Q.get(s, a)
+            new_q = old_q + params.alpha * (r + params.gamma * max_q_next - old_q)
+            Q.set(s, a, new_q)
+        
+        # Extract policy
+        policy = {}
+        states = set([t.state for t in transitions] + [t.next_state for t in transitions])
+        for state in states:
+            policy[state] = Q.get_best_action(state, ["up", "down", "left", "right"])
+        
+        return {
+            "q_values": Q.values,
+            "policy": policy,
+            "parameters_explanation": {
+                "alpha": "Learning rate - controleaza cat de mult influenteaza noile informatii valorile Q. Daca alpha=0, nu se invata nimic nou.",
+                "gamma": "Discount factor - determina importanta recompenselor viitoare. Daca gamma=0, se considera doar recompensa imediata.",
+                "epsilon": "Exploration rate - probabilitatea de a alege o actiune aleatorie (explorare vs exploatare). Daca epsilon=0, se alege mereu cea mai buna actiune cunoscuta (no exploration)."
+            }
+        }
+
+
+class TDLearningSolver(Solver):
+    """
+    TD(0) update rule: V(s) ← V(s) + α[r + γV(s') - V(s)]
+    Temporal difference learning for state values.
+    """
+    
+    def solve(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        transitions: List[Transition] = data["transitions"]
+        params: RLParameters = data["parameters"]
+        initial_v: Dict = data.get("initial_v", {})
+        
+        V = initial_v.copy()
+        td_errors = []
+        
+        for transition in transitions:
+            s, s_prime, r = transition.state, transition.next_state, transition.reward
+            
+            if s not in V:
+                V[s] = 0.0
+            if s_prime not in V:
+                V[s_prime] = 0.0
+            
+            # TD(0) update
+            td_error = r + params.gamma * V[s_prime] - V[s]
+            V[s] = V[s] + params.alpha * td_error
+            td_errors.append(td_error)
+        
+        return {
+            "values": V,
+            "td_errors": td_errors
+        }
+
+
 class SolverFactory:
     def __init__(self) -> None:
         self._mapping: Dict[QuestionType, type[Solver]] = {
@@ -211,6 +480,10 @@ class SolverFactory:
             QuestionType.NASH_EQUILIBRIUM: NashSolver,
             QuestionType.CSP_COMPLETION: CspSolver,
             QuestionType.MINIMAX_ALPHA_BETA: MinimaxAlphaBetaSolver,
+            QuestionType.VALUE_ITERATION: ValueIterationSolver,
+            QuestionType.POLICY_ITERATION: PolicyIterationSolver,
+            QuestionType.Q_LEARNING: QLearningSolver,
+            QuestionType.TD_LEARNING: TDLearningSolver,
         }
     
     def get_solver(self, q_type: QuestionType) -> Solver:

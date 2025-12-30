@@ -67,11 +67,23 @@ class MainWindow(QMainWindow):
         cfg_layout.addWidget(QLabel("Numar de intrebari:"))
         cfg_layout.addWidget(self.spin_count)
 
+        # Classic problem types
         self.chk_strategy = QCheckBox("Strategie pentru problema (N-Queens, etc.)")
         self.chk_nash = QCheckBox("Echilibru Nash (joc 2x2)")
         self.chk_csp = QCheckBox("CSP cu Backtracking + MRV")
         self.chk_minimax = QCheckBox("MinMax cu Alpha-Beta")
-        for chk in [self.chk_strategy, self.chk_nash, self.chk_csp, self.chk_minimax]:
+        
+        # MDP and Reinforcement Learning types
+        self.chk_value_iteration = QCheckBox("Value Iteration (MDP)")
+        self.chk_policy_iteration = QCheckBox("Policy Iteration (MDP)")
+        self.chk_qlearning = QCheckBox("Q-learning (RL)")
+        self.chk_tdlearning = QCheckBox("TD-learning (RL)")
+        self.chk_rl_params = QCheckBox("Parametri RL (alpha, gamma, epsilon)")
+        
+        # Add all checkboxes to layout
+        for chk in [self.chk_strategy, self.chk_nash, self.chk_csp, self.chk_minimax,
+                    self.chk_value_iteration, self.chk_policy_iteration, 
+                    self.chk_qlearning, self.chk_tdlearning, self.chk_rl_params]:
             chk.setChecked(True)
             cfg_layout.addWidget(chk)
 
@@ -132,6 +144,7 @@ class MainWindow(QMainWindow):
 
     def _selected_types(self) -> List[QuestionType]:
         types: List[QuestionType] = []
+        # Classic types
         if self.chk_strategy.isChecked():
             types.append(QuestionType.STRATEGY_SELECTION)
         if self.chk_nash.isChecked():
@@ -140,6 +153,17 @@ class MainWindow(QMainWindow):
             types.append(QuestionType.CSP_COMPLETION)
         if self.chk_minimax.isChecked():
             types.append(QuestionType.MINIMAX_ALPHA_BETA)
+        # MDP and RL types
+        if self.chk_value_iteration.isChecked():
+            types.append(QuestionType.VALUE_ITERATION)
+        if self.chk_policy_iteration.isChecked():
+            types.append(QuestionType.POLICY_ITERATION)
+        if self.chk_qlearning.isChecked():
+            types.append(QuestionType.Q_LEARNING)
+        if self.chk_tdlearning.isChecked():
+            types.append(QuestionType.TD_LEARNING)
+        if self.chk_rl_params.isChecked():
+            types.append(QuestionType.RL_PARAMETERS)
         return types
 
     def _current_question(self) -> Question | None:
