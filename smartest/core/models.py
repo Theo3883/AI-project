@@ -17,6 +17,11 @@ class QuestionType(Enum):
     TD_LEARNING = auto()
     RL_PARAMETERS = auto()
     MDP_COMPARISON = auto()
+    # Planning types
+    STRIPS_ACTION_DEFINITION = auto()
+    ADL_ACTION_DEFINITION = auto()
+    PARTIAL_ORDER_PLAN = auto()
+    PLAN_VALIDATION = auto()
 
 
 @dataclass
@@ -200,3 +205,79 @@ class RLParameters:
     alpha: float  # learning rate
     gamma: float  # discount factor
     epsilon: float  # exploration rate
+
+
+# Planning Models (STRIPS/ADL/POP)
+
+@dataclass
+class Predicate:
+    """Represents a predicate in planning (e.g., At(agent, location))."""
+    name: str  # e.g., "At", "Holding", "Clear"
+    parameters: List[str]  # e.g., ["agent", "home"]
+    positive: bool = True  # True for P(x), False for ¬P(x)
+    
+    def __str__(self) -> str:
+        """String representation of predicate."""
+        prefix = "" if self.positive else "¬"
+        params = ", ".join(self.parameters)
+        return f"{prefix}{self.name}({params})"
+    
+    def __eq__(self, other: object) -> bool:
+        """Check equality of predicates."""
+        if not isinstance(other, Predicate):
+            return False
+        return (self.name == other.name and 
+                self.parameters == other.parameters and 
+                self.positive == other.positive)
+    
+    def __hash__(self) -> int:
+        """Hash for using predicates in sets/dicts."""
+        return hash((self.name, tuple(self.parameters), self.positive))
+
+
+@dataclass
+class Action:
+    """Represents an action in STRIPS/ADL planning."""
+    name: str  # e.g., "Go", "Buy", "FromTable"
+    parameters: List[str]  # e.g., ["x", "y"] for Go(x, y)
+    preconditions: List[Predicate]  # What must be true before
+    add_effects: List[Predicate]  # What becomes true after
+    delete_effects: List[Predicate]  # What becomes false after
+    conditional_effects: List[tuple[List[Predicate], List[Predicate]]] = field(default_factory=list)  # For ADL: (condition, effects)
+    
+    def __str__(self) -> str:
+        """String representation of action."""
+        params = ", ".join(self.parameters)
+        return f"{self.name}({params})"
+
+
+@dataclass
+class PlanningProblem:
+    """Represents a complete planning problem."""
+    domain_name: str  # e.g., "Shopping", "BlocksWorld"
+    objects: List[str]  # e.g., ["store1", "home", "milk", "bread"]
+    initial_state: List[Predicate]  # Initial state predicates
+    goal_state: List[Predicate]  # Goal predicates
+    actions: List[Action]  # Available actions in this domain
+
+
+@dataclass
+class PartialOrderPlan:
+    """Represents a partial order plan (POP)."""
+    actions: List[tuple[int, Action]]  # List of (action_id, Action)
+    orderings: List[tuple[int, int]]  # Pairs (id1, id2) where id1 must come before id2
+    causal_links: List[tuple[int, Predicate, int]]  # (producer_id, predicate, consumer_id)
+    
+    def __str__(self) -> str:
+        """String representation of partial order plan."""
+        result = "Partial Order Plan:\n"
+        result += "Actions:\n"
+        for aid, action in self.actions:
+            result += f"  {aid}: {action}\n"
+        result += "Orderings:\n"
+        for id1, id2 in self.orderings:
+            result += f"  {id1} < {id2}\n"
+        result += "Causal Links:\n"
+        for producer, predicate, consumer in self.causal_links:
+            result += f"  {producer} --{predicate}--> {consumer}\n"
+        return result

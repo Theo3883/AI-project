@@ -42,11 +42,21 @@ class QAService:
             # Step 1: Parse the question
             parsed = self.parser.parse(question_text)
             
-            # Step 2: Get the appropriate solver
-            solver = self.solver_factory.get_solver(parsed.question_type)
+            # Step 2: Check if we need to solve (some question types provide guidance, not solutions)
+            guidance_only_types = {
+                QuestionType.STRIPS_ACTION_DEFINITION,
+                QuestionType.ADL_ACTION_DEFINITION,
+                QuestionType.PARTIAL_ORDER_PLAN,
+                QuestionType.PLAN_VALIDATION
+            }
             
-            # Step 3: Solve the problem
-            solution_data = solver.solve(parsed.data)
+            if parsed.question_type in guidance_only_types:
+                # For planning questions from natural language, we provide guidance
+                solution_data = {}
+            else:
+                # Step 3: Get the appropriate solver and solve
+                solver = self.solver_factory.get_solver(parsed.question_type)
+                solution_data = solver.solve(parsed.data)
             
             # Step 4: Format the response
             return self._format_response(parsed, solution_data)
@@ -110,6 +120,14 @@ class QAService:
             return self._format_qlearning_response(parsed, solution_data)
         elif parsed.question_type == QuestionType.TD_LEARNING:
             return self._format_tdlearning_response(parsed, solution_data)
+        elif parsed.question_type == QuestionType.STRIPS_ACTION_DEFINITION:
+            return self._format_strips_action_response(parsed, solution_data)
+        elif parsed.question_type == QuestionType.ADL_ACTION_DEFINITION:
+            return self._format_adl_action_response(parsed, solution_data)
+        elif parsed.question_type == QuestionType.PARTIAL_ORDER_PLAN:
+            return self._format_pop_response(parsed, solution_data)
+        elif parsed.question_type == QuestionType.PLAN_VALIDATION:
+            return self._format_plan_validation_response(parsed, solution_data)
         else:
             return QAResponse(
                 success=False,
@@ -437,6 +455,164 @@ class QAService:
             confidence=parsed.confidence,
             extracted_params="\n".join(params_lines),
             solution="\n".join(solution_lines),
+            explanation=explanation
+        )
+    
+    def _format_strips_action_response(self, parsed: ParsedProblem, solution_data: Dict[str, Any]) -> QAResponse:
+        """Format STRIPS action definition solution."""
+        # Note: For Q&A from natural language, we don't have a concrete action object
+        # So we provide a generic response about STRIPS format
+        domain = parsed.data.get("domain", "unknown")
+        action_name = parsed.data.get("action_name", "Unknown")
+        
+        formatted_action = (
+            f"Pentru a defini o acțiune în limbajul STRIPS, trebuie specificat:\n\n"
+            f"1. Precondiții: predicatele care trebuie să fie adevărate înainte de execuție\n"
+            f"2. Add-list: predicatele care devin adevărate după execuție\n"
+            f"3. Delete-list: predicatele care devin false după execuție\n\n"
+            f"Exemplu pentru domeniul {domain}:\n"
+            f"- Precond iții: ce stări trebuie să existe\n"
+            f"- Add-list: ce stări noi apar\n"
+            f"- Delete-list: ce stări dispar"
+        )
+        
+        params_lines = ["Definire Actiune STRIPS:"]
+        params_lines.append(f"  Domeniu: {domain}")
+        params_lines.append(f"  Actiune: {action_name}")
+        
+        explanation = (
+            "Reprezentarea STRIPS a unei actiuni specifica:\n"
+            "- Precondițiile: ce trebuie să fie adevărat înainte de executie\n"
+            "- Add-list: predicatele care devin adevărate după executie\n"
+            "- Delete-list: predicatele care devin false după executie"
+        )
+        
+        return QAResponse(
+            success=True,
+            detected_type="STRIPS Action Definition",
+            detected_type_enum=QuestionType.STRIPS_ACTION_DEFINITION,
+            confidence=parsed.confidence,
+            extracted_params="\n".join(params_lines),
+            solution=formatted_action,
+            explanation=explanation
+        )
+    
+    def _format_adl_action_response(self, parsed: ParsedProblem, solution_data: Dict[str, Any]) -> QAResponse:
+        """Format ADL action definition solution."""
+        domain = parsed.data.get("domain", "unknown")
+        action_name = parsed.data.get("action_name", "Unknown")
+        
+        formatted_action = (
+            f"Pentru a defini o acțiune în limbajul ADL, trebuie specificat:\n\n"
+            f"1. Precondiții (pot include disjuncții, negații)\n"
+            f"2. Add-list: efecte pozitive\n"
+            f"3. Delete-list: efecte negative\n"
+            f"4. Efecte condiționate: CÂND condiție ATUNCI efect\n\n"
+            f"Exemplu pentru domeniul {domain}:\n"
+            f"- Precondiții: ce trebuie să fie adevărat\n"
+            f"- Efecte: ce se schimbă\n"
+            f"- Efecte condiționate: schimbări dependente de condiții"
+        )
+        
+        params_lines = ["Definire Actiune ADL:"]
+        params_lines.append(f"  Domeniu: {domain}")
+        params_lines.append(f"  Actiune: {action_name}")
+        
+        explanation = (
+            "Reprezentarea ADL extinde STRIPS cu:\n"
+            "- Precondiții complexe (disjuncții, negații, cuantificatori)\n"
+            "- Efecte condiționate: CÂND conditie ATUNCI efect\n"
+            "- Mai multă expresivitate pentru probleme complexe"
+        )
+        
+        return QAResponse(
+            success=True,
+            detected_type="ADL Action Definition",
+            detected_type_enum=QuestionType.ADL_ACTION_DEFINITION,
+            confidence=parsed.confidence,
+            extracted_params="\n".join(params_lines),
+            solution=formatted_action,
+            explanation=explanation
+        )
+    
+    def _format_pop_response(self, parsed: ParsedProblem, solution_data: Dict[str, Any]) -> QAResponse:
+        """Format Partial Order Planning solution."""
+        domain = parsed.data.get("domain", "unknown")
+        
+        formatted_plan = (
+            f"Pentru a construi un plan cu ordine parțială (POP):\n\n"
+            f"1. Începe cu acțiunile Start și Finish\n"
+            f"2. Pentru fiecare obiectiv, găsește o acțiune care îl produce\n"
+            f"3. Adaugă constrângeri de ordine parțială (nu totală)\n"
+            f"4. Specifică linkuri cauzale: cine produce ce pentru cine\n"
+            f"5. Rezolvă amenințările (când o acțiune șterge precondiția alteia)\n\n"
+            f"Exemplu pentru domeniul {domain}:\n"
+            f"- Acțiuni: lista de acțiuni necesare\n"
+            f"- Ordine: relații de precedență (< sau →)\n"
+            f"- Linkuri cauzale: Producer --predicat--> Consumer"
+        )
+        
+        num_actions = 0
+        num_orderings = 0
+        num_causal_links = 0
+        
+        params_lines = ["Problema Partial Order Planning:"]
+        params_lines.append(f"  Domeniu: {domain}")
+        params_lines.append(f"  Actiuni în plan: {num_actions}")
+        params_lines.append(f"  Constrângeri de ordine: {num_orderings}")
+        params_lines.append(f"  Linkuri cauzale: {num_causal_links}")
+        
+        explanation = (
+            "Algoritmul POP (Partial Order Planning) construieste planuri incrementale:\n"
+            "1. Începe cu Start și Finish\n"
+            "2. Pentru fiecare obiectiv nerezolvat, găsește o actiune care îl produce\n"
+            "3. Adaugă constrângeri de ordine parțială (nu totală)\n"
+            "4. Rezolvă amenințările (când o actiune șterge precondiția alteia)\n"
+            "5. Linkurile cauzale arată ce actiune produce ce predicat pentru ce altă actiune"
+        )
+        
+        return QAResponse(
+            success=True,
+            detected_type="Partial Order Planning (POP)",
+            detected_type_enum=QuestionType.PARTIAL_ORDER_PLAN,
+            confidence=parsed.confidence,
+            extracted_params="\n".join(params_lines),
+            solution=formatted_plan,
+            explanation=explanation
+        )
+    
+    def _format_plan_validation_response(self, parsed: ParsedProblem, solution_data: Dict[str, Any]) -> QAResponse:
+        """Format plan validation solution."""
+        valid = solution_data.get("valid", False)
+        errors = solution_data.get("errors", [])
+        goals_achieved = solution_data.get("goals_achieved", False)
+        
+        params_lines = ["Validare Plan:"]
+        params_lines.append(f"  Plan valid: {'Da' if valid else 'Nu'}")
+        params_lines.append(f"  Obiective atinse: {'Da' if goals_achieved else 'Nu'}")
+        
+        if valid:
+            solution_text = "Planul este valid! Toate precondițiile sunt satisfăcute și obiectivele sunt atinse."
+        else:
+            solution_lines = ["Planul NU este valid. Erori identificate:"]
+            for i, error in enumerate(errors, 1):
+                solution_lines.append(f"  {i}. {error}")
+            solution_text = "\n".join(solution_lines)
+        
+        explanation = (
+            "Validarea unui plan verifică:\n"
+            "1. Toate precondițiile fiecărei actiuni sunt satisfăcute când actiunea este executată\n"
+            "2. Actiunile sunt executate în ordine validă\n"
+            "3. Obiectivele sunt atinse la sfârșitul planului"
+        )
+        
+        return QAResponse(
+            success=True,
+            detected_type="Plan Validation",
+            detected_type_enum=QuestionType.PLAN_VALIDATION,
+            confidence=parsed.confidence,
+            extracted_params="\n".join(params_lines),
+            solution=solution_text,
             explanation=explanation
         )
     

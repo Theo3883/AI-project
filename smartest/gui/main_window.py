@@ -80,10 +80,17 @@ class MainWindow(QMainWindow):
         self.chk_tdlearning = QCheckBox("TD-learning (RL)")
         self.chk_rl_params = QCheckBox("Parametri RL (alpha, gamma, epsilon)")
         
+        # Planning types (STRIPS/ADL/POP)
+        self.chk_strips_action = QCheckBox("Definire Acțiune STRIPS")
+        self.chk_adl_action = QCheckBox("Definire Acțiune ADL")
+        self.chk_pop = QCheckBox("Partial Order Planning (POP)")
+        self.chk_plan_validation = QCheckBox("Validare Plan")
+        
         # Add all checkboxes to layout
         for chk in [self.chk_strategy, self.chk_nash, self.chk_csp, self.chk_minimax,
                     self.chk_value_iteration, self.chk_policy_iteration, 
-                    self.chk_qlearning, self.chk_tdlearning, self.chk_rl_params]:
+                    self.chk_qlearning, self.chk_tdlearning, self.chk_rl_params,
+                    self.chk_strips_action, self.chk_adl_action, self.chk_pop, self.chk_plan_validation]:
             chk.setChecked(True)
             cfg_layout.addWidget(chk)
 
@@ -164,6 +171,15 @@ class MainWindow(QMainWindow):
             types.append(QuestionType.TD_LEARNING)
         if self.chk_rl_params.isChecked():
             types.append(QuestionType.RL_PARAMETERS)
+        # Planning types
+        if self.chk_strips_action.isChecked():
+            types.append(QuestionType.STRIPS_ACTION_DEFINITION)
+        if self.chk_adl_action.isChecked():
+            types.append(QuestionType.ADL_ACTION_DEFINITION)
+        if self.chk_pop.isChecked():
+            types.append(QuestionType.PARTIAL_ORDER_PLAN)
+        if self.chk_plan_validation.isChecked():
+            types.append(QuestionType.PLAN_VALIDATION)
         return types
 
     def _current_question(self) -> Question | None:

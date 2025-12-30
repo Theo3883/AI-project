@@ -17,6 +17,10 @@ from .models import (
     MDPState,
     Transition,
     RLParameters,
+    Predicate,
+    Action,
+    PlanningProblem,
+    PartialOrderPlan,
 )
 from .solvers import SolverFactory
 
@@ -769,6 +773,646 @@ class RLParametersGenerator(QuestionGenerator):
         )
 
 
+class StripsActionGenerator(QuestionGenerator):
+    """Generator for STRIPS action definition questions."""
+    
+    def generate(self, difficulty: str = "medium") -> Question:
+        """Generate a STRIPS action definition question."""
+        # Define planning domains
+        domains = ["shopping", "blocksworld", "container"]
+        domain = random.choice(domains)
+        
+        if domain == "shopping":
+            action, action_obj = self._generate_shopping_action()
+        elif domain == "blocksworld":
+            action, action_obj = self._generate_blocksworld_action()
+        else:  # container
+            action, action_obj = self._generate_container_action()
+        
+        # Generate question
+        question_text = (
+            f"Descrieți operația {action} în limbajul STRIPS pentru domeniul {domain}.\n\n"
+            f"Specificați:\n"
+            f"1. Precondițiile (ce trebuie să fie adevărat înainte)\n"
+            f"2. Add-list (ce devine adevărat după execuție)\n"
+            f"3. Delete-list (ce devine fals după execuție)"
+        )
+        
+        # Get solution from solver
+        solver = self.solver_factory.get_solver(QuestionType.STRIPS_ACTION_DEFINITION)
+        solution = solver.solve({"action": action_obj})
+        
+        correct_answer = solution["formatted_action"]
+        explanation = (
+            f"Operația {action} este definită astfel în STRIPS:\n"
+            f"{correct_answer}\n\n"
+            f"Acest lucru înseamnă că pentru a executa această acțiune, "
+            f"precondițiile trebuie să fie satisfăcute în starea curentă, "
+            f"iar după execuție, predicatele din add-list devin adevărate "
+            f"și cele din delete-list devin false."
+        )
+        
+        return Question(
+            id=self._next_id(),
+            title=f"Definire Acțiune STRIPS: {action}",
+            text=question_text,
+            q_type=QuestionType.STRIPS_ACTION_DEFINITION,
+            topic="Planning - STRIPS",
+            difficulty=difficulty,
+            correct_answer=correct_answer,
+            explanation=explanation,
+            meta={"domain": domain, "action": str(action_obj)}
+        )
+    
+    def _generate_shopping_action(self) -> tuple[str, Action]:
+        """Generate a shopping domain action."""
+        locations = ["home", "store1", "store2", "office"]
+        items = ["milk", "bread", "eggs", "coffee"]
+        
+        action_type = random.choice(["go", "buy"])
+        
+        if action_type == "go":
+            from_loc = random.choice(locations)
+            to_loc = random.choice([l for l in locations if l != from_loc])
+            
+            action = Action(
+                name="Go",
+                parameters=[from_loc, to_loc],
+                preconditions=[Predicate("At", ["agent", from_loc])],
+                add_effects=[Predicate("At", ["agent", to_loc])],
+                delete_effects=[Predicate("At", ["agent", from_loc])]
+            )
+            return f"Go({from_loc}, {to_loc})", action
+        else:  # buy
+            item = random.choice(items)
+            store = random.choice(["store1", "store2"])
+            
+            action = Action(
+                name="Buy",
+                parameters=[item, store],
+                preconditions=[
+                    Predicate("At", ["agent", store]),
+                    Predicate("Sells", [store, item])
+                ],
+                add_effects=[Predicate("Have", [item])],
+                delete_effects=[]
+            )
+            return f"Buy({item}, {store})", action
+    
+    def _generate_blocksworld_action(self) -> tuple[str, Action]:
+        """Generate a blocksworld domain action."""
+        blocks = ["A", "B", "C", "D"]
+        
+        action_type = random.choice(["fromtable", "totable", "stack", "unstack"])
+        
+        if action_type == "fromtable":
+            block = random.choice(blocks)
+            action = Action(
+                name="FromTable",
+                parameters=[block],
+                preconditions=[
+                    Predicate("OnTable", [block]),
+                    Predicate("Clear", [block]),
+                    Predicate("HandEmpty", [])
+                ],
+                add_effects=[Predicate("Holding", [block])],
+                delete_effects=[
+                    Predicate("OnTable", [block]),
+                    Predicate("Clear", [block]),
+                    Predicate("HandEmpty", [])
+                ]
+            )
+            return f"FromTable({block})", action
+        elif action_type == "totable":
+            block = random.choice(blocks)
+            action = Action(
+                name="ToTable",
+                parameters=[block],
+                preconditions=[Predicate("Holding", [block])],
+                add_effects=[
+                    Predicate("OnTable", [block]),
+                    Predicate("Clear", [block]),
+                    Predicate("HandEmpty", [])
+                ],
+                delete_effects=[Predicate("Holding", [block])]
+            )
+            return f"ToTable({block})", action
+        elif action_type == "stack":
+            block1 = random.choice(blocks)
+            block2 = random.choice([b for b in blocks if b != block1])
+            action = Action(
+                name="Stack",
+                parameters=[block1, block2],
+                preconditions=[
+                    Predicate("Holding", [block1]),
+                    Predicate("Clear", [block2])
+                ],
+                add_effects=[
+                    Predicate("On", [block1, block2]),
+                    Predicate("Clear", [block1]),
+                    Predicate("HandEmpty", [])
+                ],
+                delete_effects=[
+                    Predicate("Holding", [block1]),
+                    Predicate("Clear", [block2])
+                ]
+            )
+            return f"Stack({block1}, {block2})", action
+        else:  # unstack
+            block1 = random.choice(blocks)
+            block2 = random.choice([b for b in blocks if b != block1])
+            action = Action(
+                name="Unstack",
+                parameters=[block1, block2],
+                preconditions=[
+                    Predicate("On", [block1, block2]),
+                    Predicate("Clear", [block1]),
+                    Predicate("HandEmpty", [])
+                ],
+                add_effects=[
+                    Predicate("Holding", [block1]),
+                    Predicate("Clear", [block2])
+                ],
+                delete_effects=[
+                    Predicate("On", [block1, block2]),
+                    Predicate("Clear", [block1]),
+                    Predicate("HandEmpty", [])
+                ]
+            )
+            return f"Unstack({block1}, {block2})", action
+    
+    def _generate_container_action(self) -> tuple[str, Action]:
+        """Generate a container domain action."""
+        containers = ["box1", "box2", "bottle"]
+        items = ["ball", "pen", "key"]
+        
+        action_type = random.choice(["placecap", "removecap", "insert"])
+        
+        if action_type == "placecap":
+            container = random.choice(containers)
+            action = Action(
+                name="PlaceCap",
+                parameters=[container],
+                preconditions=[
+                    Predicate("Open", [container]),
+                    Predicate("HasCap", [container], positive=False)
+                ],
+                add_effects=[Predicate("HasCap", [container])],
+                delete_effects=[Predicate("Open", [container])]
+            )
+            return f"PlaceCap({container})", action
+        elif action_type == "removecap":
+            container = random.choice(containers)
+            action = Action(
+                name="RemoveCap",
+                parameters=[container],
+                preconditions=[Predicate("HasCap", [container])],
+                add_effects=[
+                    Predicate("Open", [container]),
+                    Predicate("HasCap", [container], positive=False)
+                ],
+                delete_effects=[Predicate("HasCap", [container])]
+            )
+            return f"RemoveCap({container})", action
+        else:  # insert
+            item = random.choice(items)
+            container = random.choice(containers)
+            action = Action(
+                name="Insert",
+                parameters=[item, container],
+                preconditions=[
+                    Predicate("Open", [container]),
+                    Predicate("Holding", [item])
+                ],
+                add_effects=[
+                    Predicate("Inside", [item, container]),
+                    Predicate("HandEmpty", [])
+                ],
+                delete_effects=[Predicate("Holding", [item])]
+            )
+            return f"Insert({item}, {container})", action
+
+
+class AdlActionGenerator(QuestionGenerator):
+    """Generator for ADL action definition questions (with conditional effects)."""
+    
+    def generate(self, difficulty: str = "medium") -> Question:
+        """Generate an ADL action definition question."""
+        # Define domains with conditional effects
+        domains = ["logistics", "robot_navigation"]
+        domain = random.choice(domains)
+        
+        if domain == "logistics":
+            action, action_obj = self._generate_logistics_action()
+        else:  # robot_navigation
+            action, action_obj = self._generate_robot_action()
+        
+        # Generate question
+        question_text = (
+            f"Descrieți operația {action} în limbajul ADL pentru domeniul {domain}.\n\n"
+            f"Specificați:\n"
+            f"1. Precondițiile\n"
+            f"2. Add-list\n"
+            f"3. Delete-list\n"
+            f"4. Efecte condiționate (CÂND ... ATUNCI ...)"
+        )
+        
+        # Get solution from solver
+        solver = self.solver_factory.get_solver(QuestionType.ADL_ACTION_DEFINITION)
+        solution = solver.solve({"action": action_obj})
+        
+        correct_answer = solution["formatted_action"]
+        explanation = (
+            f"Operația {action} în ADL include efecte condiționate:\n"
+            f"{correct_answer}\n\n"
+            f"Efectele condiționate se activează doar dacă condiția este satisfăcută."
+        )
+        
+        return Question(
+            id=self._next_id(),
+            title=f"Definire Acțiune ADL: {action}",
+            text=question_text,
+            q_type=QuestionType.ADL_ACTION_DEFINITION,
+            topic="Planning - ADL",
+            difficulty=difficulty,
+            correct_answer=correct_answer,
+            explanation=explanation,
+            meta={"domain": domain, "action": str(action_obj)}
+        )
+    
+    def _generate_logistics_action(self) -> tuple[str, Action]:
+        """Generate a logistics domain action with conditional effects."""
+        packages = ["package1", "package2"]
+        vehicles = ["truck1", "van1"]
+        
+        action_type = random.choice(["load", "unload"])
+        
+        if action_type == "load":
+            package = random.choice(packages)
+            vehicle = random.choice(vehicles)
+            
+            action = Action(
+                name="Load",
+                parameters=[package, vehicle],
+                preconditions=[
+                    Predicate("At", [package, "loc"]),
+                    Predicate("At", [vehicle, "loc"])
+                ],
+                add_effects=[Predicate("In", [package, vehicle])],
+                delete_effects=[Predicate("At", [package, "loc"])],
+                conditional_effects=[
+                    ([Predicate("Heavy", [package])], [Predicate("Slow", [vehicle])])
+                ]
+            )
+            return f"Load({package}, {vehicle})", action
+        else:  # unload
+            package = random.choice(packages)
+            vehicle = random.choice(vehicles)
+            
+            action = Action(
+                name="Unload",
+                parameters=[package, vehicle],
+                preconditions=[Predicate("In", [package, vehicle])],
+                add_effects=[Predicate("At", [package, "loc"])],
+                delete_effects=[Predicate("In", [package, vehicle])],
+                conditional_effects=[
+                    ([Predicate("Slow", [vehicle])], [Predicate("Slow", [vehicle], positive=False)])
+                ]
+            )
+            return f"Unload({package}, {vehicle})", action
+    
+    def _generate_robot_action(self) -> tuple[str, Action]:
+        """Generate a robot navigation action with conditional effects."""
+        locations = ["room1", "room2", "corridor"]
+        
+        from_loc = random.choice(locations)
+        to_loc = random.choice([l for l in locations if l != from_loc])
+        
+        action = Action(
+            name="Move",
+            parameters=[from_loc, to_loc],
+            preconditions=[Predicate("At", ["robot", from_loc])],
+            add_effects=[Predicate("At", ["robot", to_loc])],
+            delete_effects=[Predicate("At", ["robot", from_loc])],
+            conditional_effects=[
+                ([Predicate("Dark", [to_loc])], [Predicate("NeedLight", ["robot"])])
+            ]
+        )
+        return f"Move({from_loc}, {to_loc})", action
+
+
+class PartialOrderPlanGenerator(QuestionGenerator):
+    """Generator for partial order planning questions."""
+    
+    def generate(self, difficulty: str = "medium") -> Question:
+        """Generate a POP question."""
+        domains = ["shopping", "blocksworld"]
+        domain = random.choice(domains)
+        
+        if domain == "shopping":
+            problem = self._generate_shopping_problem()
+        else:
+            problem = self._generate_blocksworld_problem()
+        
+        # Format initial state and goals
+        initial_str = ", ".join(str(p) for p in problem.initial_state)
+        goals_str = ", ".join(str(p) for p in problem.goal_state)
+        
+        question_text = (
+            f"Construiți un plan incomplet folosind algoritmul de planificare cu ordine parțială (POP) "
+            f"pentru următoarea problemă din domeniul {domain}:\n\n"
+            f"Stare inițială: {initial_str}\n\n"
+            f"Obiective: {goals_str}\n\n"
+            f"Specificați:\n"
+            f"1. Acțiunile planului (minim 3 acțiuni)\n"
+            f"2. Ordinea parțială (relațiile de precedență)\n"
+            f"3. Linkurile cauzale (cine produce ce pentru cine)"
+        )
+        
+        # Get solution from solver
+        solver = self.solver_factory.get_solver(QuestionType.PARTIAL_ORDER_PLAN)
+        solution = solver.solve({"problem": problem})
+        
+        correct_answer = solution["formatted_plan"]
+        explanation = (
+            f"Planul parțial pentru această problemă:\n"
+            f"{correct_answer}\n\n"
+            f"Algoritmul POP construiește planuri incrementale, adăugând acțiuni "
+            f"pentru a satisface obiectivele și rezolvând amenințările."
+        )
+        
+        return Question(
+            id=self._next_id(),
+            title=f"Partial Order Planning - {domain}",
+            text=question_text,
+            q_type=QuestionType.PARTIAL_ORDER_PLAN,
+            topic="Planning - POP",
+            difficulty=difficulty,
+            correct_answer=correct_answer,
+            explanation=explanation,
+            meta={"domain": domain}
+        )
+    
+    def _generate_shopping_problem(self) -> PlanningProblem:
+        """Generate a shopping domain planning problem."""
+        items = random.sample(["milk", "bread", "eggs", "coffee"], k=random.randint(1, 2))
+        stores = ["store1", "store2"]
+        store = random.choice(stores)
+        
+        initial_state = [
+            Predicate("At", ["agent", "home"]),
+        ]
+        for item in items:
+            initial_state.append(Predicate("Sells", [store, item]))
+        
+        goal_state = [Predicate("Have", [item]) for item in items]
+        if random.choice([True, False]):
+            goal_state.append(Predicate("At", ["agent", "home"]))
+        
+        actions = [
+            Action(
+                name="Go",
+                parameters=["home", store],
+                preconditions=[Predicate("At", ["agent", "home"])],
+                add_effects=[Predicate("At", ["agent", store])],
+                delete_effects=[Predicate("At", ["agent", "home"])]
+            ),
+            Action(
+                name="Go",
+                parameters=[store, "home"],
+                preconditions=[Predicate("At", ["agent", store])],
+                add_effects=[Predicate("At", ["agent", "home"])],
+                delete_effects=[Predicate("At", ["agent", store])]
+            ),
+        ]
+        
+        for item in items:
+            actions.append(
+                Action(
+                    name="Buy",
+                    parameters=[item, store],
+                    preconditions=[
+                        Predicate("At", ["agent", store]),
+                        Predicate("Sells", [store, item])
+                    ],
+                    add_effects=[Predicate("Have", [item])],
+                    delete_effects=[]
+                )
+            )
+        
+        return PlanningProblem(
+            domain_name="shopping",
+            objects=["agent", "home", store] + items,
+            initial_state=initial_state,
+            goal_state=goal_state,
+            actions=actions
+        )
+    
+    def _generate_blocksworld_problem(self) -> PlanningProblem:
+        """Generate a blocksworld planning problem."""
+        blocks = ["A", "B", "C"]
+        
+        # Random initial configuration
+        initial_state = [Predicate("HandEmpty", [])]
+        if random.choice([True, False]):
+            initial_state.extend([
+                Predicate("OnTable", ["A"]),
+                Predicate("On", ["B", "A"]),
+                Predicate("OnTable", ["C"]),
+                Predicate("Clear", ["B"]),
+                Predicate("Clear", ["C"])
+            ])
+        else:
+            initial_state.extend([
+                Predicate("OnTable", ["A"]),
+                Predicate("OnTable", ["B"]),
+                Predicate("OnTable", ["C"]),
+                Predicate("Clear", ["A"]),
+                Predicate("Clear", ["B"]),
+                Predicate("Clear", ["C"])
+            ])
+        
+        # Random goal
+        goal_state = [
+            Predicate("On", ["A", "B"])
+        ]
+        
+        # Define actions
+        actions = []
+        for block in blocks:
+            actions.append(
+                Action(
+                    name="FromTable",
+                    parameters=[block],
+                    preconditions=[
+                        Predicate("OnTable", [block]),
+                        Predicate("Clear", [block]),
+                        Predicate("HandEmpty", [])
+                    ],
+                    add_effects=[Predicate("Holding", [block])],
+                    delete_effects=[
+                        Predicate("OnTable", [block]),
+                        Predicate("Clear", [block]),
+                        Predicate("HandEmpty", [])
+                    ]
+                )
+            )
+            actions.append(
+                Action(
+                    name="ToTable",
+                    parameters=[block],
+                    preconditions=[Predicate("Holding", [block])],
+                    add_effects=[
+                        Predicate("OnTable", [block]),
+                        Predicate("Clear", [block]),
+                        Predicate("HandEmpty", [])
+                    ],
+                    delete_effects=[Predicate("Holding", [block])]
+                )
+            )
+        
+        for b1 in blocks:
+            for b2 in blocks:
+                if b1 != b2:
+                    actions.append(
+                        Action(
+                            name="Stack",
+                            parameters=[b1, b2],
+                            preconditions=[
+                                Predicate("Holding", [b1]),
+                                Predicate("Clear", [b2])
+                            ],
+                            add_effects=[
+                                Predicate("On", [b1, b2]),
+                                Predicate("Clear", [b1]),
+                                Predicate("HandEmpty", [])
+                            ],
+                            delete_effects=[
+                                Predicate("Holding", [b1]),
+                                Predicate("Clear", [b2])
+                            ]
+                        )
+                    )
+        
+        return PlanningProblem(
+            domain_name="blocksworld",
+            objects=blocks,
+            initial_state=initial_state,
+            goal_state=goal_state,
+            actions=actions
+        )
+
+
+class PlanValidationGenerator(QuestionGenerator):
+    """Generator for plan validation questions."""
+    
+    def generate(self, difficulty: str = "medium") -> Question:
+        """Generate a plan validation question."""
+        # Create a simple problem
+        problem = self._create_simple_problem()
+        
+        # Create a plan (correct or with errors)
+        has_errors = random.choice([True, False])
+        plan = self._create_plan(problem, has_errors)
+        
+        # Format plan
+        plan_str = "\n".join(f"{i+1}. {action}" for i, action in enumerate(plan))
+        initial_str = ", ".join(str(p) for p in problem.initial_state)
+        goals_str = ", ".join(str(p) for p in problem.goal_state)
+        
+        question_text = (
+            f"Verificați corectitudinea următorului plan:\n\n"
+            f"Stare inițială: {initial_str}\n"
+            f"Obiective: {goals_str}\n\n"
+            f"Plan:\n{plan_str}\n\n"
+            f"Planul este corect? Dacă nu, identificați erorile."
+        )
+        
+        # Validate plan
+        solver = self.solver_factory.get_solver(QuestionType.PLAN_VALIDATION)
+        solution = solver.solve({"problem": problem, "plan": plan})
+        
+        if solution["valid"]:
+            correct_answer = "Da, planul este corect. Toate precondițiile sunt satisfăcute și obiectivele sunt atinse."
+        else:
+            errors_str = "\n".join(f"- {err}" for err in solution["errors"])
+            correct_answer = f"Nu, planul are următoarele erori:\n{errors_str}"
+        
+        explanation = (
+            f"Validarea planului:\n"
+            f"{correct_answer}\n\n"
+            f"Pentru a valida un plan, verificăm:\n"
+            f"1. Precondițiile fiecărei acțiuni sunt satisfăcute\n"
+            f"2. Obiectivele sunt atinse la sfârșitul planului"
+        )
+        
+        return Question(
+            id=self._next_id(),
+            title="Validare Plan",
+            text=question_text,
+            q_type=QuestionType.PLAN_VALIDATION,
+            topic="Planning - Validation",
+            difficulty=difficulty,
+            correct_answer=correct_answer,
+            explanation=explanation,
+            meta={"has_errors": has_errors}
+        )
+    
+    def _create_simple_problem(self) -> PlanningProblem:
+        """Create a simple shopping problem for validation."""
+        initial_state = [
+            Predicate("At", ["agent", "home"]),
+            Predicate("Sells", ["store1", "milk"])
+        ]
+        
+        goal_state = [
+            Predicate("Have", ["milk"])
+        ]
+        
+        actions = [
+            Action(
+                name="Go",
+                parameters=["home", "store1"],
+                preconditions=[Predicate("At", ["agent", "home"])],
+                add_effects=[Predicate("At", ["agent", "store1"])],
+                delete_effects=[Predicate("At", ["agent", "home"])]
+            ),
+            Action(
+                name="Buy",
+                parameters=["milk", "store1"],
+                preconditions=[
+                    Predicate("At", ["agent", "store1"]),
+                    Predicate("Sells", ["store1", "milk"])
+                ],
+                add_effects=[Predicate("Have", ["milk"])],
+                delete_effects=[]
+            )
+        ]
+        
+        return PlanningProblem(
+            domain_name="shopping",
+            objects=["agent", "home", "store1", "milk"],
+            initial_state=initial_state,
+            goal_state=goal_state,
+            actions=actions
+        )
+    
+    def _create_plan(self, problem: PlanningProblem, with_errors: bool) -> List[Action]:
+        """Create a plan (correct or with errors)."""
+        if not with_errors:
+            # Correct plan
+            return [
+                problem.actions[0],  # Go(home, store1)
+                problem.actions[1],  # Buy(milk, store1)
+            ]
+        else:
+            # Plan with error: trying to buy before going to store
+            return [
+                problem.actions[1],  # Buy(milk, store1) - ERROR: not at store!
+                problem.actions[0],  # Go(home, store1)
+            ]
+
+
 class QuestionFactory:
     def __init__(self) -> None:
         self._generators: Dict[QuestionType, QuestionGenerator] = {
@@ -781,6 +1425,10 @@ class QuestionFactory:
             QuestionType.Q_LEARNING: QLearningGenerator(),
             QuestionType.TD_LEARNING: TDLearningGenerator(),
             QuestionType.RL_PARAMETERS: RLParametersGenerator(),
+            QuestionType.STRIPS_ACTION_DEFINITION: StripsActionGenerator(),
+            QuestionType.ADL_ACTION_DEFINITION: AdlActionGenerator(),
+            QuestionType.PARTIAL_ORDER_PLAN: PartialOrderPlanGenerator(),
+            QuestionType.PLAN_VALIDATION: PlanValidationGenerator(),
         }
 
     def get_generator(self, q_type: QuestionType) -> QuestionGenerator:

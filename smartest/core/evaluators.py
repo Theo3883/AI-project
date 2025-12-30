@@ -317,6 +317,216 @@ class RLEvaluator(AnswerEvaluator):
         return 100.0 * matches / len(correct_actions) if correct_actions else 100.0
 
 
+class PlanningEvaluator(AnswerEvaluator):
+    """Evaluator for planning problems (STRIPS/ADL/POP/Validation)."""
+    
+    def evaluate(self, question: Question, user_answer: str) -> EvaluationResult:
+        norm_correct = self.text_processor.normalize(question.correct_answer)
+        norm_user = self.text_processor.normalize(user_answer)
+        
+        q_type = question.q_type
+        
+        if q_type in [QuestionType.STRIPS_ACTION_DEFINITION, QuestionType.ADL_ACTION_DEFINITION]:
+            return self._evaluate_action_definition(question, user_answer, norm_correct, norm_user)
+        elif q_type == QuestionType.PARTIAL_ORDER_PLAN:
+            return self._evaluate_pop(question, user_answer, norm_correct, norm_user)
+        elif q_type == QuestionType.PLAN_VALIDATION:
+            return self._evaluate_validation(question, user_answer, norm_correct, norm_user)
+        else:
+            # Fallback
+            score = self.text_processor.keyword_score(norm_correct, norm_user)
+            return EvaluationResult(
+                question_id=question.id,
+                score=score,
+                normalized_user_answer=norm_user,
+                feedback=f"Scor: {score:.1f}%",
+                correct_answer=question.correct_answer,
+                extra_data={}
+            )
+    
+    def _evaluate_action_definition(self, question: Question, user_answer: str, 
+                                    norm_correct: str, norm_user: str) -> EvaluationResult:
+        """Evaluate STRIPS/ADL action definitions."""
+        score = 0.0
+        feedback_parts = []
+        
+        # Check for preconditions (30%)
+        precondition_keywords = ['preconditi', 'precond', 'before', 'inainte', 'precondi']
+        has_preconditions = any(kw in norm_user for kw in precondition_keywords)
+        
+        if has_preconditions:
+            score += 30.0
+            feedback_parts.append("✓ Precondițiile sunt menționate")
+        else:
+            feedback_parts.append("✗ Lipsesc precondițiile")
+        
+        # Check for add-list (35%)
+        add_keywords = ['add-list', 'add list', 'add', 'adaug', 'include', 'contine', 'devine adevarat', 'becomes true', 'efecte pozitive']
+        has_add_list = any(kw in norm_user for kw in add_keywords)
+        
+        # Also check if user mentions predicates that should be added
+        if has_add_list or self._check_predicates_mentioned(norm_correct, norm_user, 'add'):
+            score += 35.0
+            feedback_parts.append("✓ Add-list este menționat")
+        else:
+            feedback_parts.append("✗ Lipsește add-list")
+        
+        # Check for delete-list (35%)
+        delete_keywords = ['delete-list', 'delete list', 'delete', 'delet', 'sterge', 'contine', 'include', 'devine fals', 'becomes false', 'efecte negative']
+        has_delete_list = any(kw in norm_user for kw in delete_keywords)
+        
+        if has_delete_list or self._check_predicates_mentioned(norm_correct, norm_user, 'delete'):
+            score += 35.0
+            feedback_parts.append("✓ Delete-list este menționat")
+        else:
+            feedback_parts.append("✗ Lipsește delete-list")
+        
+        # Bonus for ADL conditional effects
+        if question.q_type == QuestionType.ADL_ACTION_DEFINITION:
+            conditional_keywords = ['cand', 'when', 'atunci', 'then', 'conditional', 'conditional']
+            if any(kw in norm_user for kw in conditional_keywords):
+                feedback_parts.append("✓ Efecte condiționate menționate")
+        
+        feedback = f"Scor: {score:.1f}%\n" + "\n".join(feedback_parts)
+        
+        if score < 100:
+            feedback += f"\n\nRăspuns așteptat:\n{question.correct_answer}"
+        
+        return EvaluationResult(
+            question_id=question.id,
+            score=score,
+            normalized_user_answer=norm_user,
+            feedback=feedback,
+            correct_answer=question.correct_answer,
+            extra_data={"preconditions": has_preconditions, "add_list": has_add_list, "delete_list": has_delete_list}
+        )
+    
+    def _evaluate_pop(self, question: Question, user_answer: str, 
+                     norm_correct: str, norm_user: str) -> EvaluationResult:
+        """Evaluate partial order plans."""
+        score = 0.0
+        feedback_parts = []
+        
+        # Check for minimum number of actions (20%)
+        # Count action mentions (patterns like "Go", "Buy", "FromTable", etc.)
+        import re
+        action_pattern = r'\b[A-Z][a-z]+\s*\('
+        actions_found = re.findall(action_pattern, user_answer)
+        num_actions = len(actions_found)
+        
+        if num_actions >= 3:
+            score += 20.0
+            feedback_parts.append(f"✓ Minim 3 acțiuni prezente ({num_actions} găsite)")
+        else:
+            feedback_parts.append(f"✗ Insuficiente acțiuni ({num_actions} găsite, minim 3 necesare)")
+        
+        # Check for ordering/precedence (30%)
+        ordering_keywords = ['<', 'inainte', 'before', 'precedent', 'ordine', 'ordering']
+        has_ordering = any(kw in norm_user for kw in ordering_keywords)
+        
+        if has_ordering:
+            score += 30.0
+            feedback_parts.append("✓ Ordonare parțială specificată")
+        else:
+            feedback_parts.append("✗ Lipsește specificarea ordinii parțiale")
+        
+        # Check for causal links (30%)
+        causal_keywords = ['cauzal', 'causal', 'link', 'legatur', 'produce', 'provides']
+        has_causal_links = any(kw in norm_user for kw in causal_keywords) or '-->' in user_answer
+        
+        if has_causal_links:
+            score += 30.0
+            feedback_parts.append("✓ Linkuri cauzale menționate")
+        else:
+            feedback_parts.append("✗ Lipsesc linkurile cauzale")
+        
+        # Check if goals are addressed (20%)
+        goal_keywords = ['obiectiv', 'goal', 'final', 'finish']
+        has_goals = any(kw in norm_user for kw in goal_keywords)
+        
+        if has_goals:
+            score += 20.0
+            feedback_parts.append("✓ Obiectivele sunt abordate")
+        else:
+            feedback_parts.append("✗ Obiectivele nu sunt menționate")
+        
+        feedback = f"Scor: {score:.1f}%\n" + "\n".join(feedback_parts)
+        
+        if score < 80:
+            feedback += f"\n\nRăspuns așteptat:\n{question.correct_answer}"
+        
+        return EvaluationResult(
+            question_id=question.id,
+            score=score,
+            normalized_user_answer=norm_user,
+            feedback=feedback,
+            correct_answer=question.correct_answer,
+            extra_data={"num_actions": num_actions, "has_ordering": has_ordering, "has_causal_links": has_causal_links}
+        )
+    
+    def _evaluate_validation(self, question: Question, user_answer: str, 
+                            norm_correct: str, norm_user: str) -> EvaluationResult:
+        """Evaluate plan validation answers."""
+        # Check if user correctly identified validity
+        is_correct_valid = ('da' in norm_user and 'da' in norm_correct) or \
+                          ('nu' in norm_user and 'nu' in norm_correct) or \
+                          ('yes' in norm_user and 'yes' in norm_correct.lower()) or \
+                          ('no' in norm_user and 'no' in norm_correct.lower())
+        
+        score = 0.0
+        feedback_parts = []
+        
+        if is_correct_valid:
+            score += 50.0
+            feedback_parts.append("✓ Validitatea planului identificată corect")
+        else:
+            feedback_parts.append("✗ Validitatea planului identificată incorect")
+        
+        # Check for error identification (if plan has errors)
+        if 'erori' in norm_correct or 'error' in norm_correct.lower():
+            error_keywords = ['eroare', 'error', 'preconditi', 'obiectiv', 'goal']
+            has_error_description = any(kw in norm_user for kw in error_keywords)
+            
+            if has_error_description:
+                score += 50.0
+                feedback_parts.append("✓ Erorile sunt descrise")
+            else:
+                feedback_parts.append("✗ Erorile nu sunt descrise")
+        else:
+            # Plan is valid, user should confirm
+            if is_correct_valid:
+                score += 50.0
+        
+        feedback = f"Scor: {score:.1f}%\n" + "\n".join(feedback_parts)
+        
+        if score < 100:
+            feedback += f"\n\nRăspuns așteptat:\n{question.correct_answer}"
+        
+        return EvaluationResult(
+            question_id=question.id,
+            score=score,
+            normalized_user_answer=norm_user,
+            feedback=feedback,
+            correct_answer=question.correct_answer,
+            extra_data={"is_correct_valid": is_correct_valid}
+        )
+    
+    def _check_predicates_mentioned(self, norm_correct: str, norm_user: str, list_type: str) -> bool:
+        """Check if specific predicates from correct answer are mentioned in user answer."""
+        # Simple heuristic: check if key predicate names appear
+        import re
+        predicate_pattern = r'\b[A-Z][a-z]+\('
+        predicates_in_correct = set(re.findall(predicate_pattern, norm_correct))
+        predicates_in_user = set(re.findall(predicate_pattern, norm_user))
+        
+        # Check overlap
+        if predicates_in_correct and predicates_in_user:
+            overlap = len(predicates_in_correct & predicates_in_user)
+            return overlap >= len(predicates_in_correct) * 0.5  # At least 50% overlap
+        
+        return False
+
+
 class EvaluatorFactory:
     def __init__(self, text_processor: TextProcessor) -> None:
         self.text_processor = text_processor
@@ -331,6 +541,10 @@ class EvaluatorFactory:
             QuestionType.TD_LEARNING: RLEvaluator,
             QuestionType.RL_PARAMETERS: RLEvaluator,
             QuestionType.MDP_COMPARISON: MDPEvaluator,
+            QuestionType.STRIPS_ACTION_DEFINITION: PlanningEvaluator,
+            QuestionType.ADL_ACTION_DEFINITION: PlanningEvaluator,
+            QuestionType.PARTIAL_ORDER_PLAN: PlanningEvaluator,
+            QuestionType.PLAN_VALIDATION: PlanningEvaluator,
         }
 
     def get_evaluator(self, q_type: QuestionType) -> AnswerEvaluator:

@@ -2,11 +2,9 @@
 
 ## Rezumat Executiv
 
-Proiectul **SmarTest** poate genera în prezent doar **4 tipuri de probleme**:
-1. **STRATEGY_SELECTION** - selectarea strategiei potrivite (N-Queens, Hanoi, Graph Coloring, Knight's Tour)
-2. **NASH_EQUILIBRIUM** - verificarea echilibrului Nash pur în jocuri 2x2
-3. **CSP_COMPLETION** - completarea CSP cu Backtracking + MRV + Forward Checking
-4. **MINIMAX_ALPHA_BETA** - calcularea valorii radăcinii și numărului de frunze evaluate în arbori MinMax cu Alpha-Beta
+Inițial, proiectul **SmarTest** putea genera doar **4 tipuri de probleme** (Strategy Selection, Nash Equilibrium 2x2, CSP Completion, Minimax Alpha-Beta).  
+Între timp, aplicația a fost extinsă semnificativ și suportă acum **și probleme de tip MDP/RL, respectiv Planificare STRIPS/ADL/POP**.  
+Acest document păstrează structura analizei inițiale, dar **secțiunile 4 și 6 au fost actualizate pentru a marca problemele deja implementate**.
 
 ## Probleme care NU pot fi generate (din lista furnizată)
 
@@ -150,41 +148,38 @@ Proiectul **SmarTest** poate genera în prezent doar **4 tipuri de probleme**:
 
 ### 4. Procese de Decizie Markov (MDP) și Învățare prin Întărire (RL)
 
-**Status: ❌ COMPLET NESUPORTAT**
+**Status: ✅ COMPLET SUPORTAT (implementat ulterior în SmarTest)**
 
 #### Value Iteration și Policy Iteration
-**Întrebări care nu pot fi generate:**
+**Exemple de întrebări suportate acum:**
 - Actualizați valorile utilităților utilizând algoritmul de iterare a valorilor (Value iteration) pentru o configurație de grid dată.
 - Care stări își vor actualiza valoarea funcției utilitate în urma utilizării unui pas al algoritmului Value iteration? (Grid dat)
 - Calculați valoarea utilității unei stări (stânga-jos) considerând încă un pas al algoritmului Value iteration. Care este politica recomandată în această stare?
 - Care este complexitatea unei iterații a algoritmului Value iteration?
 - Prin ce diferă algoritmii Policy iteration și Value iteration? Care converge mai rapid?
 
-**Ce lipsește:**
-- Generator pentru probleme MDP
-- Model pentru grid-uri MDP
-- Generator de întrebări despre Value Iteration
-- Generator de întrebări despre Policy Iteration
-- Generator de întrebări despre calcularea utilităților
-- Generator de întrebări despre determinarea politicii optime
-- Generator de întrebări despre analiza complexității algoritmilor MDP
-- Generator de întrebări comparative între algoritmi
+**Ce este acum implementat:**
+- Generator pentru probleme MDP (grid world randomizat, stări terminale, pereți, recompense, factor de discount)
+- Model de date pentru grid-uri MDP (stări, tranziții stocastice, pereți)
+- Generator de întrebări despre Value Iteration (update de utilități, politică optimă, complexitate)
+- Generator de întrebări despre Policy Iteration și comparația Value vs Policy Iteration
+- Solvere pentru Value Iteration și Policy Iteration
+- Evaluator care verifică atât valorile utilităților, cât și prezența politicii în răspuns
 
 #### Q-learning și TD-learning
-**Întrebări care nu pot fi generate:**
+**Exemple de întrebări suportate acum:**
 - Actualizați valorile Q utilizând algoritmul Q-learning pentru secvențe de tranziții date.
 - Actualizați valorile utilităților utilizând algoritmul de învățare a diferențelor temporale (TD-learning) pentru secvențe de tranziții date.
-- Calculați valorile Q pentru problema Pacman, considerând două încercări (observații date).
+- Calculați valorile Q pentru o problemă de tip grid/pacman simplificat, considerând două încercări (observații date).
 - Actualizați valorile Q pentru o serie de observații de tip $(s, a, s', R(s,a,s'))$. Care este politica recomandată pentru o anumită stare?
 - Care este rolul parametrilor $\alpha$, $\gamma$ și $\epsilon$ din cadrul metodei $\epsilon$-greedy Q-learning? Care este efectul individual al setării fiecăruia la valoarea 0?
 
-**Ce lipsește:**
-- Generator pentru probleme de Reinforcement Learning
-- Model pentru secvențe de tranziții $(s, a, s', R)$
-- Generator de întrebări despre Q-learning
-- Generator de întrebări despre TD-learning
-- Generator de întrebări despre probleme specifice (Pacman)
-- Generator de întrebări despre parametrii algoritmilor RL ($\alpha$, $\gamma$, $\epsilon$)
+**Ce este acum implementat:**
+- Generator pentru probleme de Reinforcement Learning (secvențe de tranziții $(s, a, s', R)$ generate aleator)
+- Model de date pentru tranziții și parametri RL (alpha, gamma, epsilon)
+- Generator de întrebări despre Q-learning, TD-learning și parametrii RL
+- Solvere pentru Q-learning și TD-learning care aplică formulele de update
+- Evaluatori pentru răspunsuri RL (valori Q/V, politici, interpretarea parametrilor)
 
 ---
 
@@ -212,31 +207,32 @@ Proiectul **SmarTest** poate genera în prezent doar **4 tipuri de probleme**:
 
 ### 6. Probleme de Planificare (STRIPS/ADL)
 
-**Status: ❌ COMPLET NESUPORTAT**
+**Status: ✅ COMPLET SUPORTAT (implementat ulterior în SmarTest)**
 
 #### Descrierea Operațiilor (STRIPS/ADL)
-**Întrebări care nu pot fi generate:**
-- Descrieți operațiile Go(there) și Buy(x) în limbajul STRIPS/ADL.
-- Descrieți operațiile FromTable(x, y) și ToTable(x, y) în limbajul STRIPS/ADL.
-- Descrieți operațiile Buy(x, store) și Go(x, y) în limbajul STRIPS/ADL.
-- Descrieți operațiile PlaceCap(), RemoveCap(), Insert(i) în limbajul STRIPS/ADL.
+**Exemple de întrebări suportate acum:**
+- Descrieți operațiile Go(from, to) și Buy(item, store) în limbajul STRIPS/ADL.
+- Descrieți operațiile FromTable(x) și ToTable(x) în limbajul STRIPS/ADL (BlocksWorld).
+- Descrieți operațiile PlaceCap(container), RemoveCap(container), Insert(item, container) în limbajul STRIPS/ADL.
 
-**Ce lipsește:**
-- Generator pentru probleme de planificare
-- Model pentru operații STRIPS/ADL (precondiții, efecte, parametri)
-- Generator de întrebări despre descrierea operațiilor în STRIPS/ADL
-- Generator de întrebări despre predicate și acțiuni
+**Ce este acum implementat:**
+- Model pentru operații STRIPS/ADL (predicate, acțiuni, precondiții, efecte, efecte condiționate)
+- Generator pentru probleme de planificare STRIPS (domenii: Shopping, BlocksWorld, Container)
+- Generator pentru probleme de tip ADL (domenii: Logistics, Robot Navigation)
+- Solvere care formatează acțiunile în limbaj STRIPS/ADL (precondiții, add-list, delete-list, efecte condiționate)
+- Evaluator care verifică precondițiile, add-list și delete-list din răspunsul studentului
 
 #### Planificare cu Ordine Parțială (POP)
-**Întrebări care nu pot fi generate:**
+**Exemple de întrebări suportate acum:**
 - Construiți un plan incomplet (minim 3 acțiuni) utilizând algoritmul de planificare cu ordine parțială pentru obiective date.
-- Descrieți stările inițiale și obiectivele utilizând predicate.
+- Descrieți stările inițiale și obiectivele utilizând predicate și specificați linkurile cauzale.
 
-**Ce lipsește:**
-- Generator pentru probleme POP (Partial Order Planning)
-- Model pentru planuri parțiale (acțiuni, ordine, legături)
-- Generator de întrebări despre construirea planurilor parțiale
-- Generator de întrebări despre reprezentarea stărilor și obiectivelor cu predicate
+**Ce este acum implementat:**
+- Model pentru planuri parțiale (acțiuni, constrângeri de ordine, linkuri cauzale)
+- Generator pentru probleme POP în domeniile Shopping și BlocksWorld
+- Solvere care construiesc planuri POP (Start/Finish, acțiuni intermediare, linkuri cauzale)
+- Generator și solver pentru validarea planurilor (Forward search, detectarea precondițiilor nesatisfăcute și a obiectivelor neatinse)
+- Evaluator pentru răspunsuri despre planuri (număr acțiuni, ordine parțială, linkuri cauzale, atingerea obiectivelor)
 
 ---
 
@@ -273,19 +269,21 @@ Proiectul **SmarTest** poate genera în prezent doar **4 tipuri de probleme**:
 
 ## Rezumat Numeric
 
-### Probleme suportate: 4 tipuri
+### Probleme suportate (listă neexhaustivă)
 1. Strategy Selection (4 probleme: N-Queens, Hanoi, Graph Coloring, Knight's Tour)
-2. Nash Equilibrium (doar echilibru Nash pur, jocuri 2x2)
+2. Nash Equilibrium (echilibru Nash pur, jocuri 2x2)
 3. CSP Completion (Backtracking + MRV + Forward Checking)
 4. Minimax Alpha-Beta (arbori de joc)
+5. MDP (Value Iteration, Policy Iteration, comparație algoritmi)
+6. Reinforcement Learning (Q-learning, TD-learning, parametri RL)
+7. Planificare STRIPS/ADL (definire acțiuni în mai multe domenii)
+8. Planificare cu ordine parțială (POP) și validare planuri
 
-### Probleme NESUPORTATE: ~80+ tipuri de întrebări
+### Probleme NESUPORTATE: ~60+ tipuri de întrebări
 
 **Categorii complet nesuportate:**
 - ❌ Probleme de căutare specifice (X și O, 8-Puzzle, Truck Loading)
-- ❌ MDP și RL (Value Iteration, Policy Iteration, Q-learning, TD-learning)
 - ❌ Rețele Bayesiane
-- ❌ Planificare (STRIPS/ADL, POP)
 - ❌ Ontologii și Lingvistică Computațională
 
 **Categorii parțial suportate:**
@@ -300,9 +298,7 @@ Pentru a acoperi toate problemele din listă, ar trebui adăugate:
 
 1. **Generatori noi pentru:**
    - Probleme de căutare specifice (X și O, 8-Puzzle, Truck Loading)
-   - MDP și RL
    - Rețele Bayesiane
-   - Planificare STRIPS/ADL
    - Ontologii și NLP
 
 2. **Extinderi pentru generatoare existente:**
@@ -312,19 +308,13 @@ Pentru a acoperi toate problemele din listă, ar trebui adăugate:
 
 3. **Modele noi de date:**
    - Stări pentru puzzle-uri și jocuri
-   - Grid-uri MDP
    - Rețele bayesiene
-   - Planuri și operații STRIPS
    - Ontologii
 
 4. **Solvere noi:**
-   - Solvere pentru MDP (Value Iteration, Policy Iteration)
-   - Solvere pentru RL (Q-learning, TD-learning)
    - Solvere pentru rețele bayesiene (inferență)
-   - Solvere pentru planificare (POP)
 
 5. **Evaluatori noi:**
    - Evaluatori pentru răspunsuri despre probabilități
-   - Evaluatori pentru răspunsuri despre planuri
    - Evaluatori pentru răspunsuri despre ontologii
 

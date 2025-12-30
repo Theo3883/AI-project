@@ -12,7 +12,11 @@ from .models import (
     MDPState,
     Transition,
     RLParameters,
-    QTable
+    QTable,
+    Predicate,
+    Action,
+    PlanningProblem,
+    PartialOrderPlan
 )
 
 
@@ -473,6 +477,246 @@ class TDLearningSolver(Solver):
         }
 
 
+class StripsActionFormatterSolver(Solver):
+    """Solver for formatting actions in STRIPS representation."""
+    
+    def solve(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Formats an action in STRIPS language.
+        
+        Args:
+            data: Dictionary containing 'action' (Action object)
+        
+        Returns:
+            Dictionary with formatted STRIPS representation
+        """
+        action: Action = data["action"]
+        
+        # Format preconditions
+        preconditions_str = ", ".join(str(p) for p in action.preconditions)
+        
+        # Format add effects
+        add_effects_str = ", ".join(str(p) for p in action.add_effects)
+        
+        # Format delete effects
+        delete_effects_str = ", ".join(str(p) for p in action.delete_effects)
+        
+        formatted = (
+            f"Operația {action}:\n"
+            f"Precondiții: {preconditions_str if preconditions_str else 'niciuna'}\n"
+            f"Add-list: {add_effects_str if add_effects_str else 'niciuna'}\n"
+            f"Delete-list: {delete_effects_str if delete_effects_str else 'niciuna'}"
+        )
+        
+        return {
+            "formatted_action": formatted,
+            "preconditions": action.preconditions,
+            "add_effects": action.add_effects,
+            "delete_effects": action.delete_effects
+        }
+
+
+class AdlActionFormatterSolver(Solver):
+    """Solver for formatting actions in ADL representation (with conditional effects)."""
+    
+    def solve(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Formats an action in ADL language (includes conditional effects).
+        
+        Args:
+            data: Dictionary containing 'action' (Action object)
+        
+        Returns:
+            Dictionary with formatted ADL representation
+        """
+        action: Action = data["action"]
+        
+        # Format preconditions
+        preconditions_str = ", ".join(str(p) for p in action.preconditions)
+        
+        # Format add effects
+        add_effects_str = ", ".join(str(p) for p in action.add_effects)
+        
+        # Format delete effects
+        delete_effects_str = ", ".join(str(p) for p in action.delete_effects)
+        
+        formatted = (
+            f"Operația {action} (ADL):\n"
+            f"Precondiții: {preconditions_str if preconditions_str else 'niciuna'}\n"
+            f"Add-list: {add_effects_str if add_effects_str else 'niciuna'}\n"
+            f"Delete-list: {delete_effects_str if delete_effects_str else 'niciuna'}"
+        )
+        
+        # Add conditional effects if present
+        if action.conditional_effects:
+            formatted += "\nEfecte condiționate:"
+            for conditions, effects in action.conditional_effects:
+                cond_str = ", ".join(str(c) for c in conditions)
+                eff_str = ", ".join(str(e) for e in effects)
+                formatted += f"\n  CÂND {cond_str} ATUNCI {eff_str}"
+        
+        return {
+            "formatted_action": formatted,
+            "preconditions": action.preconditions,
+            "add_effects": action.add_effects,
+            "delete_effects": action.delete_effects,
+            "conditional_effects": action.conditional_effects
+        }
+
+
+class PartialOrderPlanningSolver(Solver):
+    """Solver for creating partial order plans (POP)."""
+    
+    def solve(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Creates a partial order plan to achieve goals from initial state.
+        
+        Args:
+            data: Dictionary containing 'problem' (PlanningProblem)
+        
+        Returns:
+            Dictionary with partial order plan
+        """
+        problem: PlanningProblem = data["problem"]
+        
+        # Initialize plan with Start and Finish actions
+        plan_actions = []
+        orderings = []
+        causal_links = []
+        
+        # Start action (id=0) produces initial state
+        start_action = Action(
+            name="Start",
+            parameters=[],
+            preconditions=[],
+            add_effects=problem.initial_state,
+            delete_effects=[]
+        )
+        plan_actions.append((0, start_action))
+        
+        # Finish action (id=999) requires goal state
+        finish_action = Action(
+            name="Finish",
+            parameters=[],
+            preconditions=problem.goal_state,
+            add_effects=[],
+            delete_effects=[]
+        )
+        plan_actions.append((999, finish_action))
+        
+        # Find actions to achieve each goal
+        action_id = 1
+        for goal in problem.goal_state:
+            # Find an action that produces this goal
+            producer_action = None
+            for action in problem.actions:
+                if any(eff.name == goal.name and eff.positive == goal.positive 
+                      for eff in action.add_effects):
+                    producer_action = action
+                    break
+            
+            if producer_action:
+                # Add action to plan
+                plan_actions.append((action_id, producer_action))
+                
+                # Add ordering: Start < action < Finish
+                orderings.append((0, action_id))
+                orderings.append((action_id, 999))
+                
+                # Add causal link: action produces goal for Finish
+                causal_links.append((action_id, goal, 999))
+                
+                # Check if action has preconditions that need to be satisfied
+                for precond in producer_action.preconditions:
+                    # Check if precondition is in initial state
+                    if any(p.name == precond.name and p.positive == precond.positive 
+                          for p in problem.initial_state):
+                        # Add causal link from Start
+                        causal_links.append((0, precond, action_id))
+                
+                action_id += 1
+        
+        # Create partial order plan
+        pop = PartialOrderPlan(
+            actions=plan_actions,
+            orderings=orderings,
+            causal_links=causal_links
+        )
+        
+        return {
+            "plan": pop,
+            "formatted_plan": str(pop),
+            "num_actions": len(plan_actions),
+            "num_orderings": len(orderings),
+            "num_causal_links": len(causal_links)
+        }
+
+
+class ForwardSearchPlanningSolver(Solver):
+    """Solver for validating plans using forward search."""
+    
+    def solve(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Validates a plan by applying actions forward from initial state.
+        
+        Args:
+            data: Dictionary containing 'problem' (PlanningProblem) and 'plan' (list of Actions)
+        
+        Returns:
+            Dictionary with validation results
+        """
+        problem: PlanningProblem = data["problem"]
+        plan: List[Action] = data["plan"]
+        
+        # Start with initial state
+        current_state = set(problem.initial_state)
+        
+        # Track execution
+        valid = True
+        errors = []
+        
+        # Apply each action in sequence
+        for i, action in enumerate(plan):
+            # Check preconditions
+            preconditions_satisfied = all(
+                any(p.name == s.name and p.parameters == s.parameters and p.positive == s.positive 
+                    for s in current_state)
+                for p in action.preconditions
+            )
+            
+            if not preconditions_satisfied:
+                valid = False
+                errors.append(f"Acțiunea {i+1} ({action}) are precondiții nesatisfăcute")
+                continue
+            
+            # Apply effects
+            for delete_effect in action.delete_effects:
+                # Remove from current state
+                current_state = {s for s in current_state 
+                               if not (s.name == delete_effect.name and s.parameters == delete_effect.parameters and s.positive == delete_effect.positive)}
+            
+            for add_effect in action.add_effects:
+                current_state.add(add_effect)
+        
+        # Check if goals are achieved
+        goals_achieved = all(
+            any(g.name == s.name and g.parameters == s.parameters and g.positive == s.positive 
+                for s in current_state)
+            for g in problem.goal_state
+        )
+        
+        if not goals_achieved:
+            valid = False
+            errors.append("Obiectivele nu sunt atinse la sfârșitul planului")
+        
+        return {
+            "valid": valid,
+            "errors": errors,
+            "final_state": list(current_state),
+            "goals_achieved": goals_achieved
+        }
+
+
 class SolverFactory:
     def __init__(self) -> None:
         self._mapping: Dict[QuestionType, type[Solver]] = {
@@ -484,6 +728,10 @@ class SolverFactory:
             QuestionType.POLICY_ITERATION: PolicyIterationSolver,
             QuestionType.Q_LEARNING: QLearningSolver,
             QuestionType.TD_LEARNING: TDLearningSolver,
+            QuestionType.STRIPS_ACTION_DEFINITION: StripsActionFormatterSolver,
+            QuestionType.ADL_ACTION_DEFINITION: AdlActionFormatterSolver,
+            QuestionType.PARTIAL_ORDER_PLAN: PartialOrderPlanningSolver,
+            QuestionType.PLAN_VALIDATION: ForwardSearchPlanningSolver,
         }
     
     def get_solver(self, q_type: QuestionType) -> Solver:

@@ -15,7 +15,10 @@ from ..core.models import (
     GridWorld,
     MDPState,
     Transition,
-    RLParameters
+    RLParameters,
+    Predicate,
+    Action,
+    PlanningProblem
 )
 
 
@@ -615,6 +618,197 @@ class RLExtractor(ProblemExtractor):
             }
 
 
+class StripsAdlExtractor(ProblemExtractor):
+    """Extracts STRIPS/ADL action definition problems from text."""
+    
+    KEYWORDS = ['strips', 'adl', 'operație', 'operatie', 'acțiune', 'actiune', 
+                'precondiție', 'preconditie', 'preconditions', 'add-list', 'delete-list',
+                'efecte', 'effects', 'go', 'buy', 'fromtable', 'totable', 'placecap', 'removecap', 'insert']
+    
+    def can_extract(self, text: str) -> float:
+        text_lower = text.lower()
+        keyword_matches = sum(1 for kw in self.KEYWORDS if kw in text_lower)
+        
+        # Strong indicators
+        has_strips = 'strips' in text_lower
+        has_adl = 'adl' in text_lower
+        has_action_description = any(phrase in text_lower for phrase in [
+            'descrieți operația', 'descrieti operatia', 'describe operation',
+            'describe action', 'defineți acțiunea', 'defineti actiunea'
+        ])
+        has_preconditions = 'precondi' in text_lower
+        has_effects = 'efect' in text_lower or 'add' in text_lower or 'delete' in text_lower
+        
+        confidence = 0.0
+        
+        if has_strips or has_adl:
+            confidence += 0.5
+        if has_action_description:
+            confidence += 0.3
+        if has_preconditions:
+            confidence += 0.1
+        if has_effects:
+            confidence += 0.1
+        
+        # Boost if multiple keywords present
+        if keyword_matches >= 3:
+            confidence += 0.2
+        
+        return min(confidence, 1.0)
+    
+    def extract(self, text: str) -> Dict[str, Any]:
+        """
+        Extract action definition problem from text.
+        Returns domain name and action name if found.
+        """
+        text_lower = text.lower()
+        
+        # Detect domain
+        domain = "unknown"
+        if any(word in text_lower for word in ['shopping', 'cumpărături', 'cumparaturi', 'magazin']):
+            domain = "shopping"
+        elif any(word in text_lower for word in ['blocksworld', 'blocks', 'cuburi', 'cuburi']):
+            domain = "blocksworld"
+        elif any(word in text_lower for word in ['container', 'recipient']):
+            domain = "container"
+        elif any(word in text_lower for word in ['logistics', 'logistică', 'logistica']):
+            domain = "logistics"
+        
+        # Extract action name using patterns like Go(...), Buy(...), etc.
+        action_pattern = r'(\w+)\s*\([^)]*\)'
+        action_matches = re.findall(action_pattern, text)
+        action_name = action_matches[0] if action_matches else "Unknown"
+        
+        # Check if ADL (conditional effects mentioned)
+        is_adl = 'adl' in text_lower or 'condițional' in text_lower or 'conditional' in text_lower or 'când' in text_lower or 'when' in text_lower
+        
+        return {
+            "domain": domain,
+            "action_name": action_name,
+            "is_adl": is_adl,
+            "raw_text": text
+        }
+
+
+class PopExtractor(ProblemExtractor):
+    """Extracts Partial Order Planning problems from text."""
+    
+    KEYWORDS = ['partial order planning', 'pop', 'plan incomplet', 'ordine parțială', 
+                'ordine partiala', 'linkuri cauzale', 'causal links', 'ordering constraints',
+                'planificare', 'planning']
+    
+    def can_extract(self, text: str) -> float:
+        text_lower = text.lower()
+        keyword_matches = sum(1 for kw in self.KEYWORDS if kw in text_lower)
+        
+        # Strong indicators
+        has_pop = 'partial order' in text_lower or 'pop' in text_lower
+        has_plan = 'plan' in text_lower
+        has_incomplete = 'incomplet' in text_lower or 'incomplete' in text_lower
+        has_ordering = 'ordine' in text_lower or 'ordering' in text_lower or 'precedență' in text_lower
+        has_causal_links = 'cauzal' in text_lower or 'causal' in text_lower
+        has_initial_goal = ('stare inițială' in text_lower or 'initial state' in text_lower) and \
+                          ('obiectiv' in text_lower or 'goal' in text_lower)
+        
+        confidence = 0.0
+        
+        if has_pop:
+            confidence += 0.6
+        elif has_plan and has_incomplete:
+            confidence += 0.4
+        
+        if has_ordering:
+            confidence += 0.15
+        if has_causal_links:
+            confidence += 0.15
+        if has_initial_goal:
+            confidence += 0.1
+        
+        # Boost if multiple keywords present
+        if keyword_matches >= 3:
+            confidence += 0.2
+        
+        return min(confidence, 1.0)
+    
+    def extract(self, text: str) -> Dict[str, Any]:
+        """
+        Extract POP problem from text.
+        Returns initial state, goals, and domain if found.
+        """
+        text_lower = text.lower()
+        
+        # Detect domain
+        domain = "unknown"
+        if any(word in text_lower for word in ['shopping', 'cumpărături', 'cumparaturi']):
+            domain = "shopping"
+        elif any(word in text_lower for word in ['blocksworld', 'blocks', 'cuburi']):
+            domain = "blocksworld"
+        
+        # Extract predicates (simplified pattern matching)
+        # Look for patterns like "At(agent, home)", "Have(milk)", etc.
+        predicate_pattern = r'([A-Z][a-zA-Z]*)\s*\([^)]+\)'
+        predicates_found = re.findall(predicate_pattern, text)
+        
+        # Check for initial state markers
+        has_initial = 'inițial' in text_lower or 'initial' in text_lower
+        
+        # Check for goal markers
+        has_goal = 'obiectiv' in text_lower or 'goal' in text_lower
+        
+        return {
+            "domain": domain,
+            "predicates_found": predicates_found,
+            "has_initial_state": has_initial,
+            "has_goals": has_goal,
+            "raw_text": text
+        }
+
+
+class PlanValidationExtractor(ProblemExtractor):
+    """Extracts plan validation problems from text."""
+    
+    KEYWORDS = ['valid', 'verificați', 'verificati', 'check', 'corect', 'correct',
+                'plan', 'acțiuni', 'actiuni', 'actions', 'secvență', 'secventa', 'sequence']
+    
+    def can_extract(self, text: str) -> float:
+        text_lower = text.lower()
+        keyword_matches = sum(1 for kw in self.KEYWORDS if kw in text_lower)
+        
+        # Strong indicators
+        has_validation = any(phrase in text_lower for phrase in [
+            'verificați', 'verificati', 'check', 'validate', 'corect', 'correct'
+        ])
+        has_plan = 'plan' in text_lower
+        has_sequence = 'secvență' in text_lower or 'sequence' in text_lower
+        
+        confidence = 0.0
+        
+        if has_validation and has_plan:
+            confidence += 0.7
+        elif has_validation:
+            confidence += 0.3
+        
+        if has_sequence:
+            confidence += 0.2
+        
+        if keyword_matches >= 4:
+            confidence += 0.1
+        
+        return min(confidence, 1.0)
+    
+    def extract(self, text: str) -> Dict[str, Any]:
+        """Extract plan validation problem from text."""
+        # Extract action sequence
+        # Look for patterns like "1. Go(...)" or "Go(...), Buy(...)"
+        action_pattern = r'([A-Z][a-zA-Z]*)\s*\([^)]*\)'
+        actions_found = re.findall(action_pattern, text)
+        
+        return {
+            "actions_sequence": actions_found,
+            "raw_text": text
+        }
+
+
 class ProblemParser:
     """Main parser that coordinates type detection and extraction."""
     
@@ -626,6 +820,10 @@ class ProblemParser:
             QuestionType.STRATEGY_SELECTION: StrategyExtractor(),
             QuestionType.VALUE_ITERATION: MDPExtractor(),
             QuestionType.Q_LEARNING: RLExtractor(),
+            QuestionType.STRIPS_ACTION_DEFINITION: StripsAdlExtractor(),
+            QuestionType.ADL_ACTION_DEFINITION: StripsAdlExtractor(),  # Same extractor, different handling
+            QuestionType.PARTIAL_ORDER_PLAN: PopExtractor(),
+            QuestionType.PLAN_VALIDATION: PlanValidationExtractor(),
         }
     
     def parse(self, text: str) -> ParsedProblem:
@@ -662,6 +860,10 @@ class ProblemParser:
             'coloring': ['graph color', 'colorare graf'],
             'mdp': ['mdp', 'markov', 'value iteration', 'policy iteration', 'bellman', 'grid world'],
             'rl': ['q-learning', 'q learning', 'td-learning', 'td learning', 'reinforcement learning'],
+            'strips': ['strips', 'add-list', 'delete-list'],
+            'adl': ['adl', 'conditional effect', 'condițional'],
+            'pop': ['partial order', 'pop', 'plan incomplet', 'ordine parțială', 'linkuri cauzale'],
+            'plan_validation': ['verificați plan', 'validate plan', 'plan corect'],
         }
         
         # Check for "using/with/cu/folosind" pattern with explicit problem types
@@ -738,6 +940,14 @@ class ProblemParser:
             mentioned_categories.add('mdp')
         if any(kw in text_lower for kw in ['q-learning', 'q learning', 'td-learning', 'td learning', 'reinforcement']):
             mentioned_categories.add('rl')
+        if any(kw in text_lower for kw in ['strips', 'add-list', 'delete-list']):
+            mentioned_categories.add('strips')
+        if any(kw in text_lower for kw in ['adl', 'conditional effect']):
+            mentioned_categories.add('adl')
+        if any(kw in text_lower for kw in ['partial order', 'pop', 'plan incomplet', 'linkuri cauzale']):
+            mentioned_categories.add('pop')
+        if any(kw in text_lower for kw in ['verificați plan', 'validate plan']):
+            mentioned_categories.add('plan_validation')
         # For strategy problems, only count if they seem to be the main topic
         # (avoid false positives where they're just mentioned in passing)
         strategy_mentions = sum(1 for kw in ['hanoi', 'turnuri', 'n-queen', 'nqueen', 'knight', 'cal'] if kw in text_lower)
@@ -754,7 +964,16 @@ class ProblemParser:
             if score >= 0.3
         ]
         
-        if len(high_confidence_types) > 1:
+        # Special case: STRIPS and ADL use same extractor, so if both are high confidence, it's OK
+        # Filter them out for the multiple type check
+        planning_types = {QuestionType.STRIPS_ACTION_DEFINITION, QuestionType.ADL_ACTION_DEFINITION}
+        high_conf_non_planning = [qt for qt in high_confidence_types if qt not in planning_types]
+        planning_detected = any(qt in planning_types for qt in high_confidence_types)
+        
+        # If we have planning + other types, or multiple non-planning types, reject
+        if planning_detected and len(high_conf_non_planning) > 0:
+            raise ValueError("Nu stiu sa raspund acum")
+        if len(high_conf_non_planning) > 1:
             raise ValueError("Nu stiu sa raspund acum")
         
         # Find best match
@@ -769,7 +988,11 @@ class ProblemParser:
                 "- Minimax/alpha-beta/arbore de joc pentru probleme minimax\n"
                 "- Strategy/strategie/n-queens/hanoi pentru selectia strategiei\n"
                 "- MDP/Markov/Value Iteration/Bellman/grid world pentru probleme MDP\n"
-                "- Q-learning/TD-learning/reinforcement learning pentru probleme RL"
+                "- Q-learning/TD-learning/reinforcement learning pentru probleme RL\n"
+                "- STRIPS/add-list/delete-list pentru definire acțiuni STRIPS\n"
+                "- ADL/conditional effects pentru definire acțiuni ADL\n"
+                "- Partial Order Planning/POP/plan incomplet pentru planificare cu ordine parțială\n"
+                "- Verificați plan/validate plan pentru validare planuri"
             )
         
         # Extract data using the best extractor
